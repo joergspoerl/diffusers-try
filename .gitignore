@@ -1,0 +1,57 @@
+# Python venvs
+.venv/
+.venv*/
+
+# Bytecode / Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter / IPython
+.ipynb_checkpoints/
+
+# VSCode / IDE
+.vscode/
+.idea/
+*.swp
+
+# MacOS
+.DS_Store
+
+# Logs / Temp
+*.log
+*.tmp
+/tmp/
+
+# Model & Large Artifacts (optional keep minimal)
+*.safetensors
+*.ckpt
+*.pt
+*.bin
+
+# Outputs generated
+outputs/
+
+# Hugging Face / Auth
+huggingface/token
+huggingface/*
+!huggingface/README.md
+
+# Build / Dist
+build/
+dist/
+*.egg-info/
+
+# Cache directories
+.cache/
+.python-version
+pip-wheel-metadata/
+
+# Coverage / Test
+htmlcov/
+.coverage*
+.pytest_cache/
+
+# Environment files
+.env
+.env.*
