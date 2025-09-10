@@ -99,6 +99,7 @@ def generate_continuous_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List
             neg_emb = _encode_prompt_embeddings(pipe, tokenizer, text_encoder, [cfg.negative], device)[0]
         except Exception:
             pass
+    start_time = time.time()
     for i in range(total_frames):
         g_raw = i / (total_frames - 1) if total_frames>1 else 1.0
         g_eased = ease(g_raw)
@@ -188,8 +189,15 @@ def generate_continuous_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List
             'temporal_blend': cfg.morph_temporal_blend,
             'effect_curve': cfg.morph_effect_curve
         })
-        paths.append(fpath)
-        print(f"[morph-cont {len(paths)}/{total_frames}] seg {seg_idx+1}/{len(seg_dists)}", flush=True)
+    paths.append(fpath)
+    # Progress + ETA
+    elapsed = time.time() - start_time
+    done = len(paths)
+    avg = elapsed / done if done else 0.0
+    remaining = total_frames - done
+    eta = avg * remaining
+    total_est = elapsed + eta
+    print(f"[morph-cont {done}/{total_frames}] seg {seg_idx+1}/{len(seg_dists)} elapsed={elapsed:.1f}s eta={eta:.1f}s total≈{total_est:.1f}s", flush=True)
     return paths
 
 def generate_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
@@ -308,6 +316,7 @@ def generate_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
         remaining -= cnt
     # Generate
     frame_index = 0
+    start_time = time.time()
     for seg_index, ((seg_start, seg_end), seg_frames) in enumerate(zip(emb_pairs, frames_per_segment)):
         for k in range(seg_frames):
             # Avoid duplicating last frame of previous segment: skip first frame if not first segment
@@ -405,5 +414,12 @@ def generate_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
             })
             paths.append(fpath)
             frame_index += 1
-            print(f"[morph {frame_index}/{total_frames}] segment {seg_index+1}/{segments}", flush=True)
+            # Progress + ETA
+            elapsed = time.time() - start_time
+            done = frame_index
+            avg = elapsed / done if done else 0.0
+            remaining = total_frames - done
+            eta = avg * remaining
+            total_est = elapsed + eta
+            print(f"[morph {frame_index}/{total_frames}] segment {seg_index+1}/{segments} elapsed={elapsed:.1f}s eta={eta:.1f}s total≈{total_est:.1f}s", flush=True)
     return paths

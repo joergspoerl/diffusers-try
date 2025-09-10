@@ -30,6 +30,7 @@ def generate_interpolation(cfg: GenerationConfig, pipe, run_dir: str) -> List[st
     v1_flat = lat_end.view(lat_end.size(0), -1)
 
     paths: List[str] = []
+    start_time = time.time()
     for idx in range(cfg.interp_frames):
         t = idx / (cfg.interp_frames - 1)
         if cfg.interp_slerp:
@@ -63,6 +64,13 @@ def generate_interpolation(cfg: GenerationConfig, pipe, run_dir: str) -> List[st
             'steps': cfg.steps,
             'guidance': cfg.guidance
         })
-        paths.append(fpath)
-    print(f"[interpolation {idx+1}/{cfg.interp_frames}] t={t:.3f}", flush=True)
+    paths.append(fpath)
+    # Progress + ETA
+    elapsed = time.time() - start_time
+    done = idx + 1
+    avg = elapsed / done if done else 0.0
+    remaining = cfg.interp_frames - done
+    eta = avg * remaining
+    total_est = elapsed + eta
+    print(f"[interpolation {done}/{cfg.interp_frames}] t={t:.3f} elapsed={elapsed:.1f}s eta={eta:.1f}s total≈{total_est:.1f}s", flush=True)
     return paths

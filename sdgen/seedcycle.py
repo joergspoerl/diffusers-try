@@ -14,6 +14,7 @@ def generate_seed_cycle(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
         g0 = torch.Generator(device=device).manual_seed(base_seed)
         base_latent = torch.randn((1, in_channels, latent_h, latent_w), generator=g0, device=device, dtype=dtype)
     paths: List[str] = []
+    start_time = time.time()
     for i in range(cfg.seed_cycle):
         current_seed = base_seed + i * cfg.seed_step
         gen_i = torch.Generator(device=device).manual_seed(current_seed)
@@ -46,6 +47,13 @@ def generate_seed_cycle(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
             'steps': cfg.steps,
             'guidance': cfg.guidance
         })
-        paths.append(fpath)
-    print(f"[seed_cycle {i+1}/{cfg.seed_cycle}] seed={current_seed}", flush=True)
+    paths.append(fpath)
+    # Progress + ETA
+    elapsed = time.time() - start_time
+    done = i + 1
+    avg = elapsed / done if done else 0.0
+    remaining = cfg.seed_cycle - done
+    eta = avg * remaining
+    total_est = elapsed + eta
+    print(f"[seed_cycle {done}/{cfg.seed_cycle}] seed={current_seed} elapsed={elapsed:.1f}s eta={eta:.1f}s total≈{total_est:.1f}s", flush=True)
     return paths
