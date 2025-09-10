@@ -40,6 +40,9 @@ def parse():
     p.add_argument('--morph-color-intensity', type=float, default=0.25)
     p.add_argument('--morph-noise-pulse', type=float, default=0.0)
     p.add_argument('--morph-frame-perturb', type=float, default=0.0)
+    p.add_argument('--morph-temporal-blend', type=float, default=0.0)
+    p.add_argument('--morph-effect-curve', default='center')
+    p.add_argument('--morph-smooth', action='store_true')
     return p.parse_args()
 
 def main():
@@ -68,6 +71,9 @@ def main():
     ,morph_color_intensity=args.morph_color_intensity
     ,morph_noise_pulse=args.morph_noise_pulse
     ,morph_frame_perturb=args.morph_frame_perturb
+    ,morph_temporal_blend=args.morph_temporal_blend
+    ,morph_effect_curve=args.morph_effect_curve
+    ,morph_smooth=args.morph_smooth
     ,seed_cycle=args.seed_cycle
     ,seed_step=args.seed_step
     ,latent_jitter=args.latent_jitter

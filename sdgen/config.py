@@ -49,6 +49,10 @@ class GenerationConfig:
     morph_color_intensity: float = 0.25
     morph_noise_pulse: float = 0.0  # adds sinusoidal latent noise amplitude
     morph_frame_perturb: float = 0.0  # subtle pixel-space perturbation between frames
+    # Morph refinement / smoothing
+    morph_temporal_blend: float = 0.0  # blend current frame with previous output (0..1)
+    morph_effect_curve: str = "center"  # center|linear|flat|edges
+    morph_smooth: bool = False  # apply mild smoothing filter after effects
     # Run directory management
     make_run_dir: bool = True
     run_id: Optional[str] = None

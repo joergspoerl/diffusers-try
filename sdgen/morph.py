@@ -76,6 +76,20 @@ def generate_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
             return t*t*t
         return t
 
+    prev_img_tensor = None
+    import numpy as np
+    def effect_weight(raw_t: float) -> float:
+        c = cfg.morph_effect_curve
+        if c == 'linear':
+            return raw_t
+        if c == 'flat':
+            return 1.0
+        if c == 'edges':
+            # stronger at ends, weaker mid
+            return 1 - 4*(raw_t-0.5)**2
+        # default center: strongest middle, smooth edges
+        return math.sin(raw_t * math.pi)
+
     for idx in range(cfg.morph_frames):
         raw_t = idx / (cfg.morph_frames - 1)
         t = ease(raw_t)
@@ -108,29 +122,39 @@ def generate_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
             kw['negative_prompt_embeds'] = neg_emb
         result = pipe(**kw)
         img: Image.Image = result.images[0]
-        # Psychedelic pixel post effects
+        # Pixel post effects with curve shaping
         if cfg.morph_color_shift or cfg.morph_frame_perturb > 0:
-            import numpy as np
             arr = np.array(img).astype('float32')
-            if cfg.morph_color_shift:
-                # cyclic hue-ish rotation via channel mixing matrix
-                ci = cfg.morph_color_intensity
-                # simple rotation between channels using a permutation blend
-                r,g,b = arr[...,0], arr[...,1], arr[...,2]
+            w_eff = effect_weight(raw_t)
+            if cfg.morph_color_shift and w_eff > 0:
+                ci = cfg.morph_color_intensity * w_eff
+                r,g,b = arr[...,0].copy(), arr[...,1].copy(), arr[...,2].copy()
                 arr[...,0] = (1-ci)*r + ci*g
                 arr[...,1] = (1-ci)*g + ci*b
                 arr[...,2] = (1-ci)*b + ci*r
-            if cfg.morph_frame_perturb > 0:
-                # add mild sinusoidal warp in x-direction
+            if cfg.morph_frame_perturb > 0 and w_eff > 0:
                 h,w,_ = arr.shape
-                strength = cfg.morph_frame_perturb
+                strength = cfg.morph_frame_perturb * w_eff
                 yy,xx = np.mgrid[0:h,0:w]
-                shift = (np.sin(yy/10 + raw_t*math.pi*2) * strength * 5)
-                # apply horizontal shift (nearest)
+                shift = (np.sin(yy/12 + raw_t*math.pi*2) * strength * 4)
                 xx_shifted = (xx + shift).clip(0,w-1).astype('int')
                 arr = arr[np.arange(h)[:,None], xx_shifted]
             arr = arr.clip(0,255).astype('uint8')
             img = Image.fromarray(arr)
+        # Temporal blend for stability
+        if cfg.morph_temporal_blend > 0 and prev_img_tensor is not None:
+            alpha = cfg.morph_temporal_blend
+            arr_cur = np.array(img).astype('float32')
+            arr_prev = prev_img_tensor
+            arr_blend = (1-alpha)*arr_cur + alpha*arr_prev
+            img = Image.fromarray(arr_blend.clip(0,255).astype('uint8'))
+        # Optional smoothing
+        if cfg.morph_smooth:
+            try:
+                img = img.filter(Image.Filter.SMOOTH)
+            except Exception:
+                pass
+        prev_img_tensor = np.array(img).astype('float32')
         fname = f"{cfg.run_id}-{len(paths)+1:03d}.png"
         fpath = os.path.join(run_dir, fname)
         img.save(fpath)
