@@ -2,6 +2,7 @@ import torch, os, time
 from typing import List
 from PIL import Image
 from .config import GenerationConfig
+import math, random
 
 def generate_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
     """Combined embedding + optional latent interpolation morph.
@@ -59,8 +60,25 @@ def generate_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
             so = torch.sin(omega)
             return (torch.sin((1.0 - t) * omega) / so) * v0 + (torch.sin(t * omega) / so) * v1
     paths: List[str] = []
+    def ease(t: float) -> float:
+        e = cfg.morph_ease
+        if e == 'linear':
+            return t
+        if e in ('ease','ease-in-out','sine'):
+            return 0.5 - 0.5*math.cos(math.pi*t)
+        if e == 'ease-in':
+            return t*t
+        if e == 'ease-out':
+            return 1 - (1-t)*(1-t)
+        if e == 'quad':
+            return t*t
+        if e == 'cubic':
+            return t*t*t
+        return t
+
     for idx in range(cfg.morph_frames):
-        t = idx / (cfg.morph_frames - 1)
+        raw_t = idx / (cfg.morph_frames - 1)
+        t = ease(raw_t)
         emb_blend = (1 - t) * emb_start + t * emb_end
         latents = None
         if latent_start is not None and latent_end is not None:
@@ -71,6 +89,12 @@ def generate_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
                 latents = blended_flat.view_as(latent_start)
             else:
                 latents = (1 - t) * latent_start + t * latent_end
+        # Psychedelic latent noise pulse (adds extra random latent scaled by sinus)
+        if latents is not None and cfg.morph_noise_pulse > 0:
+            amp = math.sin(raw_t * math.pi)
+            if amp > 0:
+                noise = torch.randn_like(latents) * (cfg.morph_noise_pulse * amp)
+                latents = latents + noise
         kw = dict(
             num_inference_steps=cfg.steps,
             guidance_scale=cfg.guidance,
@@ -84,6 +108,29 @@ def generate_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
             kw['negative_prompt_embeds'] = neg_emb
         result = pipe(**kw)
         img: Image.Image = result.images[0]
+        # Psychedelic pixel post effects
+        if cfg.morph_color_shift or cfg.morph_frame_perturb > 0:
+            import numpy as np
+            arr = np.array(img).astype('float32')
+            if cfg.morph_color_shift:
+                # cyclic hue-ish rotation via channel mixing matrix
+                ci = cfg.morph_color_intensity
+                # simple rotation between channels using a permutation blend
+                r,g,b = arr[...,0], arr[...,1], arr[...,2]
+                arr[...,0] = (1-ci)*r + ci*g
+                arr[...,1] = (1-ci)*g + ci*b
+                arr[...,2] = (1-ci)*b + ci*r
+            if cfg.morph_frame_perturb > 0:
+                # add mild sinusoidal warp in x-direction
+                h,w,_ = arr.shape
+                strength = cfg.morph_frame_perturb
+                yy,xx = np.mgrid[0:h,0:w]
+                shift = (np.sin(yy/10 + raw_t*math.pi*2) * strength * 5)
+                # apply horizontal shift (nearest)
+                xx_shifted = (xx + shift).clip(0,w-1).astype('int')
+                arr = arr[np.arange(h)[:,None], xx_shifted]
+            arr = arr.clip(0,255).astype('uint8')
+            img = Image.fromarray(arr)
         fname = f"{cfg.run_id}-{len(paths)+1:03d}.png"
         fpath = os.path.join(run_dir, fname)
         img.save(fpath)

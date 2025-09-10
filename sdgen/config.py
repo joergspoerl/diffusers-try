@@ -43,6 +43,12 @@ class GenerationConfig:
     morph_seed_end: Optional[int] = None
     morph_latent: bool = False
     morph_slerp: bool = False
+    # Morph psychedelic extras
+    morph_ease: str = "linear"  # linear|ease|ease-in|ease-out|sine|quad|cubic
+    morph_color_shift: bool = False
+    morph_color_intensity: float = 0.25
+    morph_noise_pulse: float = 0.0  # adds sinusoidal latent noise amplitude
+    morph_frame_perturb: float = 0.0  # subtle pixel-space perturbation between frames
     # Run directory management
     make_run_dir: bool = True
     run_id: Optional[str] = None

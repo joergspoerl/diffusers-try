@@ -35,6 +35,11 @@ def parse():
     p.add_argument('--morph-seed-start', type=int)
     p.add_argument('--morph-seed-end', type=int)
     p.add_argument('--morph-slerp', action='store_true')
+    p.add_argument('--morph-ease', default='linear')
+    p.add_argument('--morph-color-shift', action='store_true')
+    p.add_argument('--morph-color-intensity', type=float, default=0.25)
+    p.add_argument('--morph-noise-pulse', type=float, default=0.0)
+    p.add_argument('--morph-frame-perturb', type=float, default=0.0)
     return p.parse_args()
 
 def main():
@@ -58,6 +63,11 @@ def main():
     ,morph_seed_start=args.morph_seed_start
     ,morph_seed_end=args.morph_seed_end
     ,morph_slerp=args.morph_slerp
+    ,morph_ease=args.morph_ease
+    ,morph_color_shift=args.morph_color_shift
+    ,morph_color_intensity=args.morph_color_intensity
+    ,morph_noise_pulse=args.morph_noise_pulse
+    ,morph_frame_perturb=args.morph_frame_perturb
     ,seed_cycle=args.seed_cycle
     ,seed_step=args.seed_step
     ,latent_jitter=args.latent_jitter
