@@ -119,98 +119,99 @@ def generate_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
     for seg_index, ((seg_start, seg_end), seg_frames) in enumerate(zip(emb_pairs, frames_per_segment)):
         for k in range(seg_frames):
             # Avoid duplicating last frame of previous segment: skip first frame if not first segment
-            if seg_index>0 and k==0:
+            if seg_index > 0 and k == 0:
                 continue
-            local_raw = k / (seg_frames -1) if seg_frames>1 else 1.0
-            raw_t = frame_index / (total_frames -1) if total_frames>1 else 1.0
+            local_raw = k / (seg_frames - 1) if seg_frames > 1 else 1.0
+            raw_t = frame_index / (total_frames - 1) if total_frames > 1 else 1.0
             eased_global = ease(raw_t)
             eased_local = ease(local_raw)
             emb_blend = (1 - eased_local) * seg_start + eased_local * seg_end
-        latents = None
-        if latent_start is not None and latent_end is not None:
-            # Latents are still interpolated over full global progress (legacy behaviour)
-            g_t = eased_global
-            if cfg.morph_slerp:
-                flat0 = latent_start.view(latent_start.size(0), -1)
-                flat1 = latent_end.view(latent_end.size(0), -1)
-                blended_flat = slerp_lat(torch.tensor(g_t, device=device), flat0, flat1)
-                latents = blended_flat.view_as(latent_start)
-            else:
-                latents = (1 - g_t) * latent_start + g_t * latent_end
-        # Psychedelic latent noise pulse (adds extra random latent scaled by sinus)
-        if latents is not None and cfg.morph_noise_pulse > 0:
-            amp = math.sin(raw_t * math.pi)
-            if amp > 0:
-                noise = torch.randn_like(latents) * (cfg.morph_noise_pulse * amp)
-                latents = latents + noise
-        kw = dict(
-            num_inference_steps=cfg.steps,
-            guidance_scale=cfg.guidance,
-            height=cfg.height,
-            width=cfg.width,
-            prompt_embeds=emb_blend
-        )
-        if latents is not None:
-            kw['latents'] = latents.clone()
-        if neg_emb is not None and cfg.guidance and cfg.guidance > 1.0:
-            kw['negative_prompt_embeds'] = neg_emb
-        result = pipe(**kw)
-        img: Image.Image = result.images[0]
-        # Pixel post effects with curve shaping
-        if cfg.morph_color_shift or cfg.morph_frame_perturb > 0:
-            arr = np.array(img).astype('float32')
-            w_eff = effect_weight(raw_t)
-            if cfg.morph_color_shift and w_eff > 0:
-                ci = cfg.morph_color_intensity * w_eff
-                r,g,b = arr[...,0].copy(), arr[...,1].copy(), arr[...,2].copy()
-                arr[...,0] = (1-ci)*r + ci*g
-                arr[...,1] = (1-ci)*g + ci*b
-                arr[...,2] = (1-ci)*b + ci*r
-            if cfg.morph_frame_perturb > 0 and w_eff > 0:
-                h,w,_ = arr.shape
-                strength = cfg.morph_frame_perturb * w_eff
-                yy,xx = np.mgrid[0:h,0:w]
-                shift = (np.sin(yy/12 + raw_t*math.pi*2) * strength * 4)
-                xx_shifted = (xx + shift).clip(0,w-1).astype('int')
-                arr = arr[np.arange(h)[:,None], xx_shifted]
-            arr = arr.clip(0,255).astype('uint8')
-            img = Image.fromarray(arr)
-        # Temporal blend for stability
-        if cfg.morph_temporal_blend > 0 and prev_img_tensor is not None:
-            alpha = cfg.morph_temporal_blend
-            arr_cur = np.array(img).astype('float32')
-            arr_prev = prev_img_tensor
-            arr_blend = (1-alpha)*arr_cur + alpha*arr_prev
-            img = Image.fromarray(arr_blend.clip(0,255).astype('uint8'))
-        # Optional smoothing
-        if cfg.morph_smooth:
-            try:
-                img = img.filter(Image.Filter.SMOOTH)
-            except Exception:
-                pass
-        prev_img_tensor = np.array(img).astype('float32')
-        fname = f"{cfg.run_id}-{len(paths)+1:03d}.png"
-        fpath = os.path.join(run_dir, fname)
-        from . import utils
-        utils.save_image_with_meta(img, fpath, {
-            'prompt_sequence': '|'.join(prompt_sequence),
-            'segment_index': seg_index,
-            'segment_frames': seg_frames,
-            't_segment_raw': f"{local_raw:.4f}",
-            't_global_raw': f"{raw_t:.4f}",
-            't_global_eased': f"{eased_global:.4f}",
-            'mode': 'morph',
-            'model': cfg.model,
-            'steps': cfg.steps,
-            'guidance': cfg.guidance,
-            'morph_latent': cfg.morph_latent,
-            'morph_slerp': cfg.morph_slerp,
-            'color_shift': cfg.morph_color_shift,
-            'noise_pulse': cfg.morph_noise_pulse,
-            'frame_perturb': cfg.morph_frame_perturb,
-            'temporal_blend': cfg.morph_temporal_blend,
-            'effect_curve': cfg.morph_effect_curve
-        })
-        paths.append(fpath)
-        frame_index += 1
+            latents = None
+            if latent_start is not None and latent_end is not None:
+                # Latents are still interpolated over full global progress (legacy behaviour)
+                g_t = eased_global
+                if cfg.morph_slerp:
+                    flat0 = latent_start.view(latent_start.size(0), -1)
+                    flat1 = latent_end.view(latent_end.size(0), -1)
+                    blended_flat = slerp_lat(torch.tensor(g_t, device=device), flat0, flat1)
+                    latents = blended_flat.view_as(latent_start)
+                else:
+                    latents = (1 - g_t) * latent_start + g_t * latent_end
+            # Psychedelic latent noise pulse (adds extra random latent scaled by sinus)
+            if latents is not None and cfg.morph_noise_pulse > 0:
+                amp = math.sin(raw_t * math.pi)
+                if amp > 0:
+                    noise = torch.randn_like(latents) * (cfg.morph_noise_pulse * amp)
+                    latents = latents + noise
+            kw = dict(
+                num_inference_steps=cfg.steps,
+                guidance_scale=cfg.guidance,
+                height=cfg.height,
+                width=cfg.width,
+                prompt_embeds=emb_blend
+            )
+            if latents is not None:
+                kw['latents'] = latents.clone()
+            if neg_emb is not None and cfg.guidance and cfg.guidance > 1.0:
+                kw['negative_prompt_embeds'] = neg_emb
+            result = pipe(**kw)
+            img: Image.Image = result.images[0]
+            # Pixel post effects with curve shaping
+            if cfg.morph_color_shift or cfg.morph_frame_perturb > 0:
+                arr = np.array(img).astype('float32')
+                w_eff = effect_weight(raw_t)
+                if cfg.morph_color_shift and w_eff > 0:
+                    ci = cfg.morph_color_intensity * w_eff
+                    r, g, b = arr[..., 0].copy(), arr[..., 1].copy(), arr[..., 2].copy()
+                    arr[..., 0] = (1 - ci) * r + ci * g
+                    arr[..., 1] = (1 - ci) * g + ci * b
+                    arr[..., 2] = (1 - ci) * b + ci * r
+                if cfg.morph_frame_perturb > 0 and w_eff > 0:
+                    h, w, _ = arr.shape
+                    strength = cfg.morph_frame_perturb * w_eff
+                    yy, xx = np.mgrid[0:h, 0:w]
+                    shift = (np.sin(yy / 12 + raw_t * math.pi * 2) * strength * 4)
+                    xx_shifted = (xx + shift).clip(0, w - 1).astype('int')
+                    arr = arr[np.arange(h)[:, None], xx_shifted]
+                arr = arr.clip(0, 255).astype('uint8')
+                img = Image.fromarray(arr)
+            # Temporal blend for stability
+            if cfg.morph_temporal_blend > 0 and prev_img_tensor is not None:
+                alpha = cfg.morph_temporal_blend
+                arr_cur = np.array(img).astype('float32')
+                arr_prev = prev_img_tensor
+                arr_blend = (1 - alpha) * arr_cur + alpha * arr_prev
+                img = Image.fromarray(arr_blend.clip(0, 255).astype('uint8'))
+            # Optional smoothing
+            if cfg.morph_smooth:
+                try:
+                    img = img.filter(Image.Filter.SMOOTH)
+                except Exception:
+                    pass
+            prev_img_tensor = np.array(img).astype('float32')
+            fname = f"{cfg.run_id}-{len(paths)+1:03d}.png"
+            fpath = os.path.join(run_dir, fname)
+            from . import utils
+            utils.save_image_with_meta(img, fpath, {
+                'prompt_sequence': '|'.join(prompt_sequence),
+                'segment_index': seg_index,
+                'segment_frames': seg_frames,
+                't_segment_raw': f"{local_raw:.4f}",
+                't_global_raw': f"{raw_t:.4f}",
+                't_global_eased': f"{eased_global:.4f}",
+                'mode': 'morph',
+                'model': cfg.model,
+                'steps': cfg.steps,
+                'guidance': cfg.guidance,
+                'morph_latent': cfg.morph_latent,
+                'morph_slerp': cfg.morph_slerp,
+                'color_shift': cfg.morph_color_shift,
+                'noise_pulse': cfg.morph_noise_pulse,
+                'frame_perturb': cfg.morph_frame_perturb,
+                'temporal_blend': cfg.morph_temporal_blend,
+                'effect_curve': cfg.morph_effect_curve
+            })
+            paths.append(fpath)
+            frame_index += 1
+            print(f"[morph {frame_index}/{total_frames}] segment {seg_index+1}/{segments}", flush=True)
     return paths

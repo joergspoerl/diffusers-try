@@ -1,5 +1,6 @@
 from typing import List
 import os, time, torch
+from dataclasses import asdict
 from PIL import Image
 from .config import GenerationConfig
 from .pipeline import infer_defaults
@@ -10,6 +11,7 @@ from . import interpolate, seedcycle, morph, video
 
 def run_generation(cfg: GenerationConfig, pipe) -> List[str]:
     steps, guidance = infer_defaults(cfg.model, cfg.steps, cfg.guidance)
+    overall_start = time.time()
     # Prepare run directory
     if cfg.make_run_dir:
         # Morph spezifischer run_id Name falls zutreffend
@@ -192,6 +194,7 @@ def run_generation(cfg: GenerationConfig, pipe) -> List[str]:
             print(f"[WARN] Video fehlgeschlagen: {e}")
             video_path = None
     # Metadata
+    duration = time.time() - overall_start
     if cfg.write_meta:
         meta = {
             'run_id': run_id,
@@ -210,7 +213,54 @@ def run_generation(cfg: GenerationConfig, pipe) -> List[str]:
             'interp_frames': cfg.interp_frames,
             'morph_frames': cfg.morph_frames,
             'files': [os.path.basename(p) for p in paths],
-            'video': os.path.basename(video_path) if video_path else None
+            'video': os.path.basename(video_path) if video_path else None,
+            'runtime_seconds': round(duration, 3),
+            'avg_seconds_per_image': round(duration/len(paths), 3) if paths else None
         }
         utils.write_metadata(run_dir, run_id, meta)
+        # Markdown Summary
+        try:
+            summary_path = os.path.join(run_dir, f"{run_id}-summary.md")
+            cfg_dict = asdict(cfg)
+            def fmt(val):
+                if isinstance(val, list):
+                    return ', '.join(str(v) for v in val)
+                return val
+            core_rows = [
+                ('Run ID', run_id),
+                ('Mode', cfg.mode),
+                ('Model', cfg.model),
+                ('Prompt', (cfg.prompt if cfg.prompt else '')), 
+                ('Morph Prompts', fmt(cfg.morph_prompts) if cfg.morph_prompts else ''),
+                ('Images', len(paths)),
+                ('Height', cfg.height),
+                ('Width', cfg.width),
+                ('Steps', cfg.steps),
+                ('Guidance', cfg.guidance),
+                ('Seed', cfg.seed),
+                ('Seed Cycle', cfg.seed_cycle),
+                ('Interpolation Frames', cfg.interp_frames),
+                ('Morph Frames', cfg.morph_frames),
+                ('Video', os.path.basename(video_path) if video_path else ''),
+                ('Runtime (s)', round(duration,3)),
+                ('Avg / Image (s)', round(duration/len(paths),3) if paths else 'n/a')
+            ]
+            lines = [f"# Run Summary: {run_id}", '', '## Parameter', '', '| Key | Value |', '|-----|-------|']
+            for k,v in core_rows:
+                lines.append(f"| {k} | {v} |")
+            lines += ['', '## Files', '']
+            for pth in paths:
+                lines.append(f"- {os.path.basename(pth)}")
+            if video_path:
+                lines.append(f"- {os.path.basename(video_path)} (video)")
+            lines += ['', '## Raw Config (excerpt)', '', '```json']
+            # Limit raw config size and remove large internals
+            raw_cfg = {k: v for k, v in cfg_dict.items() if k not in ('run_dir',)}
+            import json as _json
+            lines.append(_json.dumps(raw_cfg, indent=2, ensure_ascii=False))
+            lines.append('```')
+            with open(summary_path, 'w', encoding='utf-8') as f:
+                f.write('\n'.join(lines))
+        except Exception as e:  # pragma: no cover
+            print('[WARN] Konnte Summary Markdown nicht schreiben:', e)
     return paths

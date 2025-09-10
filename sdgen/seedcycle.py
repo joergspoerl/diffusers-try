@@ -47,4 +47,5 @@ def generate_seed_cycle(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
             'guidance': cfg.guidance
         })
         paths.append(fpath)
+    print(f"[seed_cycle {i+1}/{cfg.seed_cycle}] seed={current_seed}", flush=True)
     return paths

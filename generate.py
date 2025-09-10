@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Haupt-CLI für SDGen."""
-import argparse, json, os
+import argparse, json, os, sys
 from dataclasses import asdict
 from sdgen import GenerationConfig, build_pipeline, run_generation
 
@@ -66,63 +66,83 @@ def main():
             cfg_data = json.load(f)
     else:
         cfg_data = {}
-    # CLI Overrides (überschreiben Einträge aus Datei)
-    def set_if(name, value):
-        if value is not None:
-            cfg_data[name] = value
+    # CLI Overrides: nur wenn explizit gesetzt
+    argv_tokens = set(sys.argv[1:])
+    def flag_present(opt: str) -> bool:
+        return opt in argv_tokens
+    def set_if(name, value, opt=None, allow_zero=True):
+        # opt: zugehöriger CLI-Option-Name (z.B. '--morph-frames')
+        if opt and not flag_present(opt):
+            return  # nicht explizit gesetzt
+        if value is None:
+            return
+        if not allow_zero and value == 0:
+            return
+        cfg_data[name] = value
+    def set_bool(name, value, opt):
+        # store_true Flags: nur setzen wenn True (explizit angegeben)
+        if value and flag_present(opt):
+            cfg_data[name] = True
+        # Falls in config True und Flag NICHT gesetzt -> belassen
     # Primitive Felder
-    set_if('prompt', args.prompt)
-    set_if('negative', args.negative)
-    set_if('model', args.model)
-    set_if('height', args.height)
-    set_if('width', args.width)
-    set_if('steps', args.steps)
-    set_if('guidance', args.guidance)
-    set_if('images', args.images)
-    set_if('seed', args.seed)
-    set_if('half', args.half)
-    set_if('outdir', args.outdir)
+    set_if('prompt', args.prompt, '--prompt')
+    set_if('negative', args.negative, '--negative')
+    set_if('model', args.model, '--model')
+    set_if('height', args.height, '--height')
+    set_if('width', args.width, '--width')
+    set_if('steps', args.steps, '--steps')
+    set_if('guidance', args.guidance, '--guidance')
+    set_if('images', args.images, '--images')
+    set_if('seed', args.seed, '--seed')
+    set_bool('half', args.half, '--half')
+    set_if('outdir', args.outdir, '--outdir')
     # Morph
-    set_if('morph_from', args.morph_from)
-    set_if('morph_to', args.morph_to)
-    if args.morph_prompts:
+    set_if('morph_from', args.morph_from, '--morph-from')
+    set_if('morph_to', args.morph_to, '--morph-to')
+    if args.morph_prompts and flag_present('--morph-prompts'):
         cfg_data['morph_prompts'] = [s.strip() for s in args.morph_prompts.split(',')]
-    set_if('morph_frames', args.morph_frames)
-    set_if('morph_latent', args.morph_latent)
-    set_if('morph_seed_start', args.morph_seed_start)
-    set_if('morph_seed_end', args.morph_seed_end)
-    set_if('morph_slerp', args.morph_slerp)
-    set_if('morph_ease', args.morph_ease)
-    set_if('morph_color_shift', args.morph_color_shift)
-    set_if('morph_color_intensity', args.morph_color_intensity)
-    set_if('morph_noise_pulse', args.morph_noise_pulse)
-    set_if('morph_frame_perturb', args.morph_frame_perturb)
-    set_if('morph_temporal_blend', args.morph_temporal_blend)
-    set_if('morph_effect_curve', args.morph_effect_curve)
-    set_if('morph_smooth', args.morph_smooth)
+    set_if('morph_frames', args.morph_frames, '--morph-frames')
+    set_bool('morph_latent', args.morph_latent, '--morph-latent')
+    set_if('morph_seed_start', args.morph_seed_start, '--morph-seed-start')
+    set_if('morph_seed_end', args.morph_seed_end, '--morph-seed-end')
+    set_bool('morph_slerp', args.morph_slerp, '--morph-slerp')
+    set_if('morph_ease', args.morph_ease, '--morph-ease')
+    set_bool('morph_color_shift', args.morph_color_shift, '--morph-color-shift')
+    set_if('morph_color_intensity', args.morph_color_intensity, '--morph-color-intensity')
+    set_if('morph_noise_pulse', args.morph_noise_pulse, '--morph-noise-pulse')
+    set_if('morph_frame_perturb', args.morph_frame_perturb, '--morph-frame-perturb')
+    set_if('morph_temporal_blend', args.morph_temporal_blend, '--morph-temporal-blend')
+    set_if('morph_effect_curve', args.morph_effect_curve, '--morph-effect-curve')
+    set_bool('morph_smooth', args.morph_smooth, '--morph-smooth')
     # Seed cycle / interpolation / video
-    set_if('seed_cycle', args.seed_cycle)
-    set_if('seed_step', args.seed_step)
-    set_if('latent_jitter', args.latent_jitter)
-    set_if('video', args.video)
-    set_if('video_name', args.video_name)
-    set_if('video_fps', args.video_fps)
-    set_if('video_blend_mode', args.video_blend_mode)
-    set_if('video_blend_steps', args.video_blend_steps)
-    set_if('video_target_duration', args.video_target_duration)
-    set_if('video_frames', args.video_frames)
-    set_if('interp_seed_start', args.interp_seed_start)
-    set_if('interp_seed_end', args.interp_seed_end)
-    set_if('interp_frames', args.interp_frames)
-    set_if('interp_slerp', args.interp_slerp)
-    set_if('cpu_offload', args.cpu_offload)
-    set_if('seq_offload', args.seq_offload)
-    set_if('no_slicing', args.no_slicing)
-    set_if('info_only', args.info)
+    set_if('seed_cycle', args.seed_cycle, '--seed-cycle')
+    set_if('seed_step', args.seed_step, '--seed-step')
+    set_if('latent_jitter', args.latent_jitter, '--latent-jitter')
+    set_bool('video', args.video, '--video')
+    set_if('video_name', args.video_name, '--video-name')
+    set_if('video_fps', args.video_fps, '--video-fps')
+    set_if('video_blend_mode', args.video_blend_mode, '--video-blend-mode')
+    set_if('video_blend_steps', args.video_blend_steps, '--video-blend-steps')
+    set_if('video_target_duration', args.video_target_duration, '--video-target-duration')
+    set_if('video_frames', args.video_frames, '--video-frames')
+    set_if('interp_seed_start', args.interp_seed_start, '--interp-seed-start')
+    set_if('interp_seed_end', args.interp_seed_end, '--interp-seed-end')
+    set_if('interp_frames', args.interp_frames, '--interp-frames')
+    set_bool('interp_slerp', args.interp_slerp, '--interp-slerp')
+    set_bool('cpu_offload', args.cpu_offload, '--cpu-offload')
+    set_bool('seq_offload', args.seq_offload, '--seq-offload')
+    set_bool('no_slicing', args.no_slicing, '--no-slicing')
+    set_bool('info_only', args.info, '--info')
     # Validierung: Prompt muss vorhanden sein (außer info_only) wenn kein Morph-Liste generiert
     if not cfg_data.get('prompt') and not cfg_data.get('morph_prompts') and not (cfg_data.get('morph_from') and cfg_data.get('morph_to')) and not cfg_data.get('info_only'):
         raise SystemExit('Fehlender Prompt: --prompt oder Morph-Parameter oder --config mit prompt angeben')
     cfg = GenerationConfig(**cfg_data)
+    if args.config:
+        print('[DEBUG] Effektive Konfiguration nach Merge:')
+        try:
+            print(json.dumps(cfg_data, indent=2, ensure_ascii=False))
+        except Exception:
+            pass
     pipe = build_pipeline(cfg.model, cfg.half)
     paths = run_generation(cfg, pipe)
     print('Dateien:')

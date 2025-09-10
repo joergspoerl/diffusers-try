@@ -307,6 +307,8 @@ Jedes PNG enthält – soweit möglich – Text-Chunks mit Parametern.
 | morph | prompt_start, prompt_end, t_raw, t_eased, morph_latent, morph_slerp, effect_curve |
 | video extend | video_extend=true zusätzlich |
 
+Zusätzlich pro Lauf: Markdown Zusammenfassung `<run_id>-summary.md` (Tabelle Kernparameter, Dateiliste, Roh-Config-Auszug).
+
 Anzeigen:
 
 ```bash

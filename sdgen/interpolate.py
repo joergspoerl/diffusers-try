@@ -64,4 +64,5 @@ def generate_interpolation(cfg: GenerationConfig, pipe, run_dir: str) -> List[st
             'guidance': cfg.guidance
         })
         paths.append(fpath)
+    print(f"[interpolation {idx+1}/{cfg.interp_frames}] t={t:.3f}", flush=True)
     return paths

@@ -202,6 +202,7 @@ Jeder Run erzeugt `<run_id>.json` + PNG Text-Chunks (falls unterstützt). Auswah
 | morph | prompt_start, prompt_end, t_raw, t_eased, morph_latent, effect_curve |
 | video extend | video_extend=true |
 | (global config) | zusätzliche Datei <run_id>-config.json mit vollständiger Konfiguration |
+| (summary) | <run_id>-summary.md (Tabellen-Übersicht + Dateien + Roh-Config) |
 
 Auslesen:
 
