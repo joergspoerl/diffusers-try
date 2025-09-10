@@ -7,7 +7,7 @@ Leistungsfähiges, modulares Text‑zu‑Bild / Sequenz / Video Toolkit auf Basi
 1. Überblick & Features  
 2. Installation  
 3. Schnellstart  
-4. Architektur (`generate_mod.py` & Paket `sdgen`)  
+4. Architektur (CLI `generate.py` & Paket `sdgen`)  
 5. Modi (single, batch, seed_cycle, interpolation, morph)  
 6. Morph – Parameter & Effekte (psychedelisch & Stabilisierung)  
 7. Video-Erstellung & Optionen  
@@ -22,7 +22,7 @@ Leistungsfähiges, modulares Text‑zu‑Bild / Sequenz / Video Toolkit auf Basi
 
 ## 1. Überblick & Features
 
-Zentraler Einstieg: `generate_mod.py` (alte Datei `generate.py` ist ein Wrapper).  
+Zentraler Einstieg: `generate.py`.  
 Alle Ausgaben landen unter `outputs/<run_id>/` (Bilder, optional MP4, JSON).
 
 Unterstützte Funktionen:
@@ -69,19 +69,19 @@ huggingface-cli login
 Ultraschnell mit Turbo (minimaler Guidance & Steps):
 
 ```bash
-python generate_mod.py --prompt "surreal landscape" --model stabilityai/sd-turbo --steps 2 --guidance 0.0 --half
+python generate.py --prompt "surreal landscape" --model stabilityai/sd-turbo --steps 2 --guidance 0.0 --half
 ```
 
 Batch:
 
 ```bash
-python generate_mod.py --prompt "futuristic drone" --images 4 --model stabilityai/sd-turbo --steps 3 --guidance 0.0
+python generate.py --prompt "futuristic drone" --images 4 --model stabilityai/sd-turbo --steps 3 --guidance 0.0
 ```
 
 Morph (einfach):
 
 ```bash
-python generate_mod.py \
+python generate.py \
   --prompt placeholder \
   --morph-from "ancient forest" --morph-to "cyberpunk city" \
   --morph-frames 16 --steps 6 --model stabilityai/sd-turbo --guidance 0.0 --half \
@@ -96,8 +96,7 @@ Dateien:
 
 | Datei / Modul | Zweck |
 |---------------|-------|
-| `generate_mod.py` | CLI Parsing, Erzeugung `GenerationConfig`, Start der Pipeline |
-| `generate.py` | Wrapper für Rückwärtskompatibilität |
+| `generate.py` | CLI Parsing, Erzeugung `GenerationConfig`, Start der Pipeline |
 | `sdgen/config.py` | Dataclass aller Parameter |
 | `sdgen/modes.py` | Modus-Erkennung & Orchestrierung, Video + Metadaten |
 | `sdgen/morph.py` | Prompt & Latent Morph + Effekte |
@@ -217,25 +216,25 @@ identify -verbose outputs/<run>/<file>.png | grep -i prompt -A2
 ### A) Single Bild
 
 ```bash
-python generate_mod.py --prompt "studio portrait of a golden retriever" --model runwayml/stable-diffusion-v1-5 --steps 25 --guidance 7.5
+python generate.py --prompt "studio portrait of a golden retriever" --model runwayml/stable-diffusion-v1-5 --steps 25 --guidance 7.5
 ```
 
 ### B) Batch
 
 ```bash
-python generate_mod.py --prompt "isometric voxel bakery" --images 6 --model stabilityai/sd-turbo --steps 4 --guidance 0.0
+python generate.py --prompt "isometric voxel bakery" --images 6 --model stabilityai/sd-turbo --steps 4 --guidance 0.0
 ```
 
 ### C) Seed Cycle
 
 ```bash
-python generate_mod.py --prompt "futuristic drone" --seed-cycle 32 --seed-step 997 --latent-jitter 0.05 --model stabilityai/sd-turbo --steps 4 --guidance 0.0 --video --video-blend-mode linear --video-blend-steps 2
+python generate.py --prompt "futuristic drone" --seed-cycle 32 --seed-step 997 --latent-jitter 0.05 --model stabilityai/sd-turbo --steps 4 --guidance 0.0 --video --video-blend-mode linear --video-blend-steps 2
 ```
 
 ### D) Interpolation
 
 ```bash
-python generate_mod.py --prompt "alien desert" \
+python generate.py --prompt "alien desert" \
   --interp-seed-start 111 --interp-seed-end 999 --interp-frames 32 --interp-slerp \
   --model stabilityai/sd-turbo --steps 4 --guidance 0.0 --video --video-target-duration 8
 ```
@@ -243,7 +242,7 @@ python generate_mod.py --prompt "alien desert" \
 ### E) Morph Sanft
 
 ```bash
-python generate_mod.py \
+python generate.py \
   --morph-from "sunrise over desert" --morph-to "stormy ocean at night" \
   --morph-frames 20 --steps 6 --model stabilityai/sd-turbo --guidance 0.0 --half \
   --morph-latent --morph-seed-start 11 --morph-seed-end 222 --morph-slerp --morph-ease ease \
@@ -256,7 +255,7 @@ python generate_mod.py \
 ### F) Morph Kreativ
 
 ```bash
-python generate_mod.py \
+python generate.py \
   --morph-from "ancient crystalline library floating in space" \
   --morph-to "bioluminescent coral cathedral under the deep sea" \
   --morph-frames 28 --steps 6 --model stabilityai/sd-turbo --guidance 0.0 --half \

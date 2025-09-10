@@ -1,6 +1,6 @@
 # Morph & Video Generator – Deutsche Dokumentation
 
-Diese Dokumentation beschreibt das modulare Skript `generate_mod.py` und das Paket `sdgen`, mit dem fortgeschrittene Bildserien, Morph-Sequenzen und Videos aus Text-Prompts erzeugt werden.
+Diese Dokumentation beschreibt das modulare Skript `generate.py` und das Paket `sdgen`, mit dem fortgeschrittene Bildserien, Morph-Sequenzen und Videos aus Text-Prompts erzeugt werden.
 
 ## Inhalt
 
@@ -19,7 +19,7 @@ Diese Dokumentation beschreibt das modulare Skript `generate_mod.py` und das Pak
 
 ## Überblick
 
-`generate_mod.py` nutzt das interne Paket `sdgen`, um verschiedene Generations-Modi auf Basis von *Stable Diffusion* (z.B. `stabilityai/sd-turbo`) auszuführen. Es unterstützt:
+`generate.py` nutzt das interne Paket `sdgen`, um verschiedene Generations-Modi auf Basis von *Stable Diffusion* (z.B. `stabilityai/sd-turbo`) auszuführen. Es unterstützt:
 
 - Einzel- und Batch-Generierung
 - Seed-Cycle (fortlaufende Variation über Seeds)
@@ -31,7 +31,7 @@ Diese Dokumentation beschreibt das modulare Skript `generate_mod.py` und das Pak
 - Metadaten pro Run (JSON)
 - PNG Text-Metadaten pro Bild (Prompt / Modus / Parameter)
 
-Kompatibilität: Der alte Einstieg `generate.py` bleibt als Wrapper erhalten und ruft intern `generate_mod.py` auf.
+
 
 Alle Ausgaben landen standardmäßig unter `outputs/<run_id>/`.
 
@@ -71,13 +71,13 @@ huggingface-cli login
 Ein einfaches einzelnes Bild (Turbo, sehr wenige Steps, guidance 0):
 
 ```bash
-python generate_mod.py --prompt "surreal landscape" --model stabilityai/sd-turbo --steps 2 --guidance 0.0 --half
+python generate.py --prompt "surreal landscape" --model stabilityai/sd-turbo --steps 2 --guidance 0.0 --half
 ```
 
 Mehrere Bilder (Batch):
 
 ```bash
-python generate_mod.py --prompt "futuristic drone" --images 4 --model stabilityai/sd-turbo --steps 3 --guidance 0.0
+python generate.py --prompt "futuristic drone" --images 4 --model stabilityai/sd-turbo --steps 3 --guidance 0.0
 ```
 
 ---
@@ -132,7 +132,7 @@ Verbindet zwei Seeds im Latent-Raum über Zwischenzustände.
 Beispiel:
 
 ```bash
-python generate_mod.py --prompt "ancient sculpture" \
+python generate.py --prompt "ancient sculpture" \
   --interp-seed-start 111 --interp-seed-end 999 --interp-frames 24 --interp-slerp \
   --model stabilityai/sd-turbo --steps 4 --guidance 0.0 --half \
   --video --video-blend-mode linear --video-blend-steps 2
@@ -192,7 +192,7 @@ Tipp: Höhere Blend-Steps glätten, erhöhen aber Rechenzeit / Dateigröße.
 ### Sanftes Morph (stabil)
 
 ```bash
-python generate_mod.py \
+python generate.py \
   --morph-from "sunrise over desert" \
   --morph-to "stormy ocean at night" \
   --morph-frames 20 --steps 6 --model stabilityai/sd-turbo --guidance 0.0 --half \
@@ -206,7 +206,7 @@ python generate_mod.py \
 ### Kreativeres Psychedelisches Morph
 
 ```bash
-python generate_mod.py \
+python generate.py \
   --morph-from "ancient crystalline library floating in space" \
   --morph-to "bioluminescent coral cathedral under the deep sea" \
   --morph-frames 28 --steps 6 --model stabilityai/sd-turbo --guidance 0.0 --half \
