@@ -24,6 +24,7 @@ Leistungsfähiges, modulares Text‑zu‑Bild / Sequenz / Video Toolkit auf Basi
 
 - [Detaillierte Dokumentation & Nutzung (DOKU.md)](DOKU.md)
 - [Architektur & Diagramme (ARCHITEKTUR.md)](ARCHITEKTUR.md)
+- [Web UI Architektur (WEBUI.md)](WEBUI.md)
 
 ---
 
