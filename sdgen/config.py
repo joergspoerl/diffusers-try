@@ -13,10 +13,6 @@ class GenerationConfig:
     images: int = 1
     seed: Optional[int] = None
     half: bool = False
-    cpu_offload: bool = False
-    seq_offload: bool = False
-    no_slicing: bool = False
-    info_only: bool = False
     outdir: str = "outputs"
     # Video
     video: bool = False
@@ -31,6 +27,11 @@ class GenerationConfig:
     interp_seed_end: Optional[int] = None
     interp_frames: int = 0
     interp_slerp: bool = False
+    # Offload / performance flags (legacy + modular)
+    cpu_offload: bool = False
+    seq_offload: bool = False
+    no_slicing: bool = False
+    info_only: bool = False
     # Seed cycling
     seed_cycle: int = 0
     seed_step: int = 997

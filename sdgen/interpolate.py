@@ -50,6 +50,18 @@ def generate_interpolation(cfg: GenerationConfig, pipe, run_dir: str) -> List[st
         img: Image.Image = result.images[0]
         fname = f"{cfg.run_id}-{len(paths)+1:03d}.png"
         fpath = os.path.join(run_dir, fname)
-        img.save(fpath)
+        from . import utils
+        utils.save_image_with_meta(img, fpath, {
+            'prompt': cfg.prompt,
+            'negative': cfg.negative,
+            'mode': 'interpolation',
+            'model': cfg.model,
+            't': f"{t:.4f}",
+            'slerp': cfg.interp_slerp,
+            'seed_start': cfg.interp_seed_start,
+            'seed_end': cfg.interp_seed_end,
+            'steps': cfg.steps,
+            'guidance': cfg.guidance
+        })
         paths.append(fpath)
     return paths

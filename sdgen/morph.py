@@ -157,6 +157,23 @@ def generate_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
         prev_img_tensor = np.array(img).astype('float32')
         fname = f"{cfg.run_id}-{len(paths)+1:03d}.png"
         fpath = os.path.join(run_dir, fname)
-        img.save(fpath)
+        from . import utils
+        utils.save_image_with_meta(img, fpath, {
+            'prompt_start': cfg.morph_from,
+            'prompt_end': cfg.morph_to,
+            't_raw': f"{raw_t:.4f}",
+            't_eased': f"{t:.4f}",
+            'mode': 'morph',
+            'model': cfg.model,
+            'steps': cfg.steps,
+            'guidance': cfg.guidance,
+            'morph_latent': cfg.morph_latent,
+            'morph_slerp': cfg.morph_slerp,
+            'color_shift': cfg.morph_color_shift,
+            'noise_pulse': cfg.morph_noise_pulse,
+            'frame_perturb': cfg.morph_frame_perturb,
+            'temporal_blend': cfg.morph_temporal_blend,
+            'effect_curve': cfg.morph_effect_curve
+        })
         paths.append(fpath)
     return paths

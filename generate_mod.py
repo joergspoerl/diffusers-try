@@ -16,6 +16,10 @@ def parse():
     p.add_argument('--seed', type=int)
     p.add_argument('--outdir', default='outputs')
     p.add_argument('--half', action='store_true')
+    p.add_argument('--cpu-offload', action='store_true')
+    p.add_argument('--seq-offload', action='store_true')
+    p.add_argument('--no-slicing', action='store_true')
+    p.add_argument('--info', action='store_true')
     # Seed cycle & jitter
     p.add_argument('--seed-cycle', type=int, default=0)
     p.add_argument('--seed-step', type=int, default=997)
@@ -27,6 +31,7 @@ def parse():
     p.add_argument('--video-blend-mode', choices=['none','linear','flow'], default='none')
     p.add_argument('--video-blend-steps', type=int, default=0)
     p.add_argument('--video-target-duration', type=float, default=0.0)
+    p.add_argument('--video-frames', type=int, default=0)
     # Morph / advanced
     p.add_argument('--morph-from')
     p.add_argument('--morph-to')
@@ -35,6 +40,11 @@ def parse():
     p.add_argument('--morph-seed-start', type=int)
     p.add_argument('--morph-seed-end', type=int)
     p.add_argument('--morph-slerp', action='store_true')
+    # Interpolation
+    p.add_argument('--interp-seed-start', type=int)
+    p.add_argument('--interp-seed-end', type=int)
+    p.add_argument('--interp-frames', type=int, default=0)
+    p.add_argument('--interp-slerp', action='store_true')
     p.add_argument('--morph-ease', default='linear')
     p.add_argument('--morph-color-shift', action='store_true')
     p.add_argument('--morph-color-intensity', type=float, default=0.25)
@@ -83,6 +93,15 @@ def main():
     ,video_blend_mode=args.video_blend_mode
     ,video_blend_steps=args.video_blend_steps
     ,video_target_duration=args.video_target_duration
+    ,video_frames=args.video_frames
+    ,interp_seed_start=args.interp_seed_start
+    ,interp_seed_end=args.interp_seed_end
+    ,interp_frames=args.interp_frames
+    ,interp_slerp=args.interp_slerp
+    ,cpu_offload=args.cpu_offload
+    ,seq_offload=args.seq_offload
+    ,no_slicing=args.no_slicing
+    ,info_only=args.info
     )
     pipe = build_pipeline(cfg.model, cfg.half)
     paths = run_generation(cfg, pipe)

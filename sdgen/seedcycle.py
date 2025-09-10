@@ -34,6 +34,17 @@ def generate_seed_cycle(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
         img: Image.Image = result.images[0]
         fname = f"{cfg.run_id}-{len(paths)+1:03d}.png"
         fpath = os.path.join(run_dir, fname)
-        img.save(fpath)
+        from . import utils
+        utils.save_image_with_meta(img, fpath, {
+            'prompt': cfg.prompt,
+            'negative': cfg.negative,
+            'mode': 'seed_cycle',
+            'model': cfg.model,
+            'current_seed': current_seed,
+            'seed_step': cfg.seed_step,
+            'latent_jitter': cfg.latent_jitter,
+            'steps': cfg.steps,
+            'guidance': cfg.guidance
+        })
         paths.append(fpath)
     return paths

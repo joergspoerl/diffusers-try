@@ -29,6 +29,9 @@ Diese Dokumentation beschreibt das modulare Skript `generate_mod.py` und das Pak
 - Glättung & zeitliche Stabilisierung
 - Video-Zusammenbau inkl. Blend-Frames und Ziel-Dauer
 - Metadaten pro Run (JSON)
+- PNG Text-Metadaten pro Bild (Prompt / Modus / Parameter)
+
+Kompatibilität: Der alte Einstieg `generate.py` bleibt als Wrapper erhalten und ruft intern `generate_mod.py` auf.
 
 Alle Ausgaben landen standardmäßig unter `outputs/<run_id>/`.
 
@@ -117,7 +120,23 @@ Erzeugt Sequenz unterschiedlicher Seeds.
 
 ### 3. Latent Interpolation
 
-(Nicht vollständig in CLI gezeigt – Seeds Start/End & Frames.) Verbindet zwei Seeds über mehrere Zwischen-Latents; optional Slerp.
+Verbindet zwei Seeds im Latent-Raum über Zwischenzustände.
+
+| Flag | Beschreibung |
+|------|--------------|
+| `--interp-seed-start S` | Start-Seed |
+| `--interp-seed-end E` | Ziel-Seed |
+| `--interp-frames N` | Anzahl Frames (>=2) |
+| `--interp-slerp` | Sphärische statt linearer Interpolation |
+
+Beispiel:
+
+```bash
+python generate_mod.py --prompt "ancient sculpture" \
+  --interp-seed-start 111 --interp-seed-end 999 --interp-frames 24 --interp-slerp \
+  --model stabilityai/sd-turbo --steps 4 --guidance 0.0 --half \
+  --video --video-blend-mode linear --video-blend-steps 2
+```
 
 ### 4. Morph
 
@@ -158,10 +177,11 @@ Wichtige Parameter:
 | Flag | Bedeutung |
 |------|-----------|
 | `--video-name name.mp4` | Optional eigener Dateiname |
-| `--video-target-duration 12` | Ziel-Länge in Sekunden (berechnet fps) |
 | `--video-fps N` | Fixes fps (überschreibt Dauerheuristik) |
+| `--video-target-duration 12` | Ziel-Länge in Sekunden (berechnet fps wenn `--video-fps` 0) |
 | `--video-blend-mode <none\|linear\|flow>` | Zusätzliche Zwischenbilder (flow benötigt OpenCV) |
 | `--video-blend-steps N` | Anzahl Blendframes zwischen zwei Keyframes |
+| `--video-frames N` | (nur single/batch) Erzwingt Gesamtzahl Frames; füllt per Zusatzbilder auf |
 
 Tipp: Höhere Blend-Steps glätten, erhöhen aber Rechenzeit / Dateigröße.
 
@@ -206,6 +226,19 @@ python generate_mod.py \
 - `--morph-temporal-blend` > 0.5 kann Details verwischen – moderat bleiben.
 - Farb- und Warp-Effekte vorsichtig dosieren (≤0.5) für Lesbarkeit.
 
+### Offload / Ressourcen Flags
+
+| Flag | Wirkung |
+|------|--------|
+| `--half` | FP16 falls möglich (weniger VRAM, schneller) |
+| (Standard) | Attention Slicing aktiv (VRAM sparen) |
+| `--no-slicing` | Deaktiviert Slicing (etwas schneller, mehr VRAM) |
+| `--cpu-offload` | Automatisches CPU Offload (diffusers) |
+| `--seq-offload` | Sequentielles Offload (max VRAM-Ersparnis, langsamer) |
+| `--info` | Nur Modell-Parameter zählen, keine Bilder |
+
+`--seq-offload` überschreibt `--cpu-offload` falls beides angegeben.
+
 ---
 
 ## Troubleshooting
@@ -217,6 +250,7 @@ python generate_mod.py \
 | Farben zu extrem | Hohe `--morph-color-intensity` | Wert reduzieren (<0.3) |
 | Unscharfe Endframes | Zu wenige Steps / guidance 0 | Steps erhöhen oder geringe guidance (>1) testen |
 | Flow Blend ignoriert | OpenCV nicht installiert | `pip install opencv-python` |
+| PNG-Metadaten fehlen | Schreibfehler / PIL ohne PNGInfo | JSON-Datei nutzen oder Pillow aktualisieren |
 
 ---
 
@@ -226,6 +260,32 @@ python generate_mod.py \
 - Kaleidoskop / Spiegel-Symmetrie
 - GIF / WebM Export
 - Adaptive Effekt-Attenuation bei hoher Detaildichte
+- GIF / WebM Export
+- Abschaltbare PNG-Metadaten (`--no-png-meta`)
+- Ping-Pong Schleife für Morph / Interpolation
+
+---
+
+## PNG Metadaten
+
+Jedes PNG enthält – soweit möglich – Text-Chunks mit Parametern.
+
+| Modus | Schlüssel (Auswahl) |
+|-------|---------------------|
+| single/batch | prompt, negative, model, mode, seed, steps, guidance |
+| seed_cycle | prompt, mode, current_seed, seed_step, latent_jitter |
+| interpolation | prompt, mode, t, slerp, seed_start, seed_end |
+| morph | prompt_start, prompt_end, t_raw, t_eased, morph_latent, morph_slerp, effect_curve |
+| video extend | video_extend=true zusätzlich |
+
+Anzeigen:
+
+```bash
+exiftool -a -G -s outputs/<run>/<file>.png
+identify -verbose outputs/<run>/<file>.png | grep -i prompt -A2
+```
+
+Fällt das Schreiben aus, bleibt die PNG nutzbar; Run-JSON enthält Gesamtdaten.
 
 ---
 
