@@ -47,6 +47,8 @@ class GenerationConfig:
     morph_seed_end: Optional[int] = None
     morph_latent: bool = False
     morph_slerp: bool = False
+    # Continuous multi-prompt morph (global progress without segment resets)
+    morph_continuous: bool = False
     # Morph psychedelic extras
     morph_ease: str = "linear"  # linear|ease|ease-in|ease-out|sine|quad|cubic
     morph_color_shift: bool = False

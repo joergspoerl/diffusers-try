@@ -125,6 +125,7 @@ Modus-Priorität: morph > interpolation > seed_cycle > batch > single.
 | seed_cycle | `--seed-cycle > 0` |
 | interpolation | `--interp-*` Seeds + Frames |
 | morph | `--morph-from`, `--morph-to`, `--morph-frames > 1` |
+| morph (continuous) | `--morph-prompts >=3 --morph-frames > 1 --morph-continuous` |
 
 ### Seed Cycle Flags
 
@@ -137,6 +138,10 @@ Modus-Priorität: morph > interpolation > seed_cycle > batch > single.
 ### Morph Flags (Basis)
 
 `--morph-from A --morph-to B --morph-frames N [--morph-latent --morph-seed-start S --morph-seed-end E --morph-slerp]`
+
+Kontinuierlicher Multi-Prompt Fluss:
+
+`--morph-prompts "p1,p2,p3,..." --morph-frames N --morph-continuous [--morph-latent --morph-slerp]`
 
 ---
 

@@ -43,6 +43,7 @@ def parse():
     p.add_argument('--morph-seed-start', type=int)
     p.add_argument('--morph-seed-end', type=int)
     p.add_argument('--morph-slerp', action='store_true')
+    p.add_argument('--morph-continuous', action='store_true', help='Kontinuierlicher Multi-Prompt Morph (kein Segment-Reset)')
     # Interpolation
     p.add_argument('--interp-seed-start', type=int)
     p.add_argument('--interp-seed-end', type=int)
@@ -106,6 +107,7 @@ def main():
     set_if('morph_seed_start', args.morph_seed_start, '--morph-seed-start')
     set_if('morph_seed_end', args.morph_seed_end, '--morph-seed-end')
     set_bool('morph_slerp', args.morph_slerp, '--morph-slerp')
+    set_bool('morph_continuous', args.morph_continuous, '--morph-continuous')
     set_if('morph_ease', args.morph_ease, '--morph-ease')
     set_bool('morph_color_shift', args.morph_color_shift, '--morph-color-shift')
     set_if('morph_color_intensity', args.morph_color_intensity, '--morph-color-intensity')

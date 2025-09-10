@@ -83,6 +83,7 @@ Alle Felder der `GenerationConfig` inkl. Default, Typ, zugehörigem CLI Flag (fa
 | morph_seed_end | `--morph-seed-end` | Optional[int] | None | Seed B für Latent Morph |
 | morph_latent | `--morph-latent` | bool | False | Latent Interp aktivieren |
 | morph_slerp | `--morph-slerp` | bool | False | Slerp für Latent |
+| morph_continuous | `--morph-continuous` | bool | False | Globaler kontinuierlicher Multi-Prompt Morph |
 
 ### 3.6 Morph Effekte / Stabilisierung
 
