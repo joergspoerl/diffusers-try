@@ -201,6 +201,7 @@ Jeder Run erzeugt `<run_id>.json` + PNG Text-Chunks (falls unterstützt). Auswah
 | interpolation | t, slerp, seed_start, seed_end |
 | morph | prompt_start, prompt_end, t_raw, t_eased, morph_latent, effect_curve |
 | video extend | video_extend=true |
+| (global config) | zusätzliche Datei <run_id>-config.json mit vollständiger Konfiguration |
 
 Auslesen:
 
@@ -217,6 +218,25 @@ identify -verbose outputs/<run>/<file>.png | grep -i prompt -A2
 
 ```bash
 python generate.py --prompt "studio portrait of a golden retriever" --model runwayml/stable-diffusion-v1-5 --steps 25 --guidance 7.5
+```
+
+Konfiguration aus Datei laden (+ Override):
+
+`config.json` Beispiel:
+
+```json
+{
+  "prompt": "studio portrait of a golden retriever",
+  "model": "runwayml/stable-diffusion-v1-5",
+  "steps": 25,
+  "guidance": 7.5
+}
+```
+
+Aufruf:
+
+```bash
+python generate.py --config config.json --guidance 6.5
 ```
 
 ### B) Batch
@@ -239,7 +259,7 @@ python generate.py --prompt "alien desert" \
   --model stabilityai/sd-turbo --steps 4 --guidance 0.0 --video --video-target-duration 8
 ```
 
-### E) Morph Sanft
+### E) Morph Sanft (2-Punkt)
 
 ```bash
 python generate.py \
@@ -252,7 +272,7 @@ python generate.py \
   --video --video-blend-mode linear --video-blend-steps 2 --video-target-duration 8 --prompt placeholder
 ```
 
-### F) Morph Kreativ
+### F) Morph Kreativ (2-Punkt)
 
 ```bash
 python generate.py \
@@ -264,6 +284,19 @@ python generate.py \
   --morph-noise-pulse 0.35 --morph-frame-perturb 0.35 \
   --morph-temporal-blend 0.3 --morph-effect-curve center --morph-smooth \
   --video --video-blend-mode linear --video-blend-steps 3 --video-target-duration 12 --prompt placeholder
+```
+
+### G) Morph Sequenz (mehrere Stufen)
+
+```bash
+python generate.py \
+  --morph-prompts "ancient forest, misty ruins, neon alley, cyberpunk skyline" \
+  --morph-frames 40 --steps 6 --model stabilityai/sd-turbo --guidance 0.0 --half \
+  --morph-latent --morph-seed-start 1111 --morph-seed-end 9999 --morph-slerp --morph-ease ease \
+  --morph-color-shift --morph-color-intensity 0.25 \
+  --morph-noise-pulse 0.2 --morph-frame-perturb 0.2 \
+  --morph-temporal-blend 0.35 --morph-effect-curve center --morph-smooth \
+  --video --video-blend-mode linear --video-blend-steps 2 --video-target-duration 10 --prompt placeholder
 ```
 
 ---

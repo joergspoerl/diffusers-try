@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, List
 
 @dataclass
 class GenerationConfig:
@@ -37,8 +37,11 @@ class GenerationConfig:
     seed_step: int = 997
     latent_jitter: float = 0.0
     # Morphing
+    # Legacy two-point morph
     morph_from: Optional[str] = None
     morph_to: Optional[str] = None
+    # New multi-stage morph: list von Prompts (überschreibt morph_from/morph_to falls gesetzt)
+    morph_prompts: Optional[List[str]] = None
     morph_frames: int = 0
     morph_seed_start: Optional[int] = None
     morph_seed_end: Optional[int] = None

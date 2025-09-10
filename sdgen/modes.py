@@ -31,7 +31,7 @@ def run_generation(cfg: GenerationConfig, pipe) -> List[str]:
     cfg.steps, cfg.guidance = infer_defaults(cfg.model, cfg.steps, cfg.guidance)
 
     # Interpolation priority after morph
-    if cfg.morph_from and cfg.morph_to and cfg.morph_frames > 1:
+    if (cfg.morph_prompts and len(cfg.morph_prompts) >= 2 and cfg.morph_frames > 1) or (cfg.morph_from and cfg.morph_to and cfg.morph_frames > 1):
         cfg.mode = 'morph'
     elif cfg.interp_seed_start is not None and cfg.interp_seed_end is not None and cfg.interp_frames > 1:
         cfg.mode = 'interpolation'
@@ -197,6 +197,7 @@ def run_generation(cfg: GenerationConfig, pipe) -> List[str]:
             'run_id': run_id,
             'mode': cfg.mode,
             'prompt': cfg.prompt,
+            'morph_prompts': cfg.morph_prompts,
             'negative': cfg.negative,
             'model': cfg.model,
             'steps': cfg.steps,

@@ -30,8 +30,17 @@ def generate_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
                 emb = out
         return emb
 
-    emb_start = encode(cfg.morph_from)
-    emb_end = encode(cfg.morph_to)
+    # Determine prompt sequence
+    if cfg.morph_prompts and len(cfg.morph_prompts) >= 2:
+        prompt_sequence = cfg.morph_prompts
+    else:
+        prompt_sequence = [cfg.morph_from, cfg.morph_to]
+    # Pre-encode all prompt embeddings once
+    embeddings = [encode(p) for p in prompt_sequence]
+    emb_pairs = list(zip(embeddings[:-1], embeddings[1:]))
+    # For legacy metadata
+    emb_start = embeddings[0]
+    emb_end = embeddings[-1]
     neg_emb = None
     if cfg.negative:
         try:
@@ -90,19 +99,44 @@ def generate_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
         # default center: strongest middle, smooth edges
         return math.sin(raw_t * math.pi)
 
-    for idx in range(cfg.morph_frames):
-        raw_t = idx / (cfg.morph_frames - 1)
-        t = ease(raw_t)
-        emb_blend = (1 - t) * emb_start + t * emb_end
+    total_frames = cfg.morph_frames
+    segments = len(emb_pairs)
+    # Distribute frames across segments (at least 2 per segment ideally). We ensure continuity.
+    # Strategy: equal proportions; remainder to early segments. Include last frame only in final segment.
+    base = max(2, total_frames // segments) if segments>0 else total_frames
+    # Build a list with frame counts per segment
+    remaining = total_frames
+    frames_per_segment = []
+    for i in range(segments):
+        if i == segments -1:
+            cnt = remaining
+        else:
+            cnt = max(2, remaining // (segments - i))
+        frames_per_segment.append(cnt)
+        remaining -= cnt
+    # Generate
+    frame_index = 0
+    for seg_index, ((seg_start, seg_end), seg_frames) in enumerate(zip(emb_pairs, frames_per_segment)):
+        for k in range(seg_frames):
+            # Avoid duplicating last frame of previous segment: skip first frame if not first segment
+            if seg_index>0 and k==0:
+                continue
+            local_raw = k / (seg_frames -1) if seg_frames>1 else 1.0
+            raw_t = frame_index / (total_frames -1) if total_frames>1 else 1.0
+            eased_global = ease(raw_t)
+            eased_local = ease(local_raw)
+            emb_blend = (1 - eased_local) * seg_start + eased_local * seg_end
         latents = None
         if latent_start is not None and latent_end is not None:
+            # Latents are still interpolated over full global progress (legacy behaviour)
+            g_t = eased_global
             if cfg.morph_slerp:
                 flat0 = latent_start.view(latent_start.size(0), -1)
                 flat1 = latent_end.view(latent_end.size(0), -1)
-                blended_flat = slerp_lat(torch.tensor(t, device=device), flat0, flat1)
+                blended_flat = slerp_lat(torch.tensor(g_t, device=device), flat0, flat1)
                 latents = blended_flat.view_as(latent_start)
             else:
-                latents = (1 - t) * latent_start + t * latent_end
+                latents = (1 - g_t) * latent_start + g_t * latent_end
         # Psychedelic latent noise pulse (adds extra random latent scaled by sinus)
         if latents is not None and cfg.morph_noise_pulse > 0:
             amp = math.sin(raw_t * math.pi)
@@ -159,10 +193,12 @@ def generate_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
         fpath = os.path.join(run_dir, fname)
         from . import utils
         utils.save_image_with_meta(img, fpath, {
-            'prompt_start': cfg.morph_from,
-            'prompt_end': cfg.morph_to,
-            't_raw': f"{raw_t:.4f}",
-            't_eased': f"{t:.4f}",
+            'prompt_sequence': '|'.join(prompt_sequence),
+            'segment_index': seg_index,
+            'segment_frames': seg_frames,
+            't_segment_raw': f"{local_raw:.4f}",
+            't_global_raw': f"{raw_t:.4f}",
+            't_global_eased': f"{eased_global:.4f}",
             'mode': 'morph',
             'model': cfg.model,
             'steps': cfg.steps,
@@ -176,4 +212,5 @@ def generate_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
             'effect_curve': cfg.morph_effect_curve
         })
         paths.append(fpath)
+        frame_index += 1
     return paths

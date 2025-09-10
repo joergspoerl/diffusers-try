@@ -74,6 +74,26 @@ Ein einfaches einzelnes Bild (Turbo, sehr wenige Steps, guidance 0):
 python generate.py --prompt "surreal landscape" --model stabilityai/sd-turbo --steps 2 --guidance 0.0 --half
 ```
 
+Aus JSON-Konfiguration:
+
+`cfg.json`:
+
+```json
+{
+  "prompt": "surreal landscape",
+  "model": "stabilityai/sd-turbo",
+  "steps": 2,
+  "guidance": 0.0,
+  "half": true
+}
+```
+
+Start mit Override (ändert guidance):
+
+```bash
+python generate.py --config cfg.json --guidance 0.5
+```
+
 Mehrere Bilder (Batch):
 
 ```bash
@@ -140,17 +160,26 @@ python generate.py --prompt "ancient sculpture" \
 
 ### 4. Morph
 
-Interpoliert Prompt-Embeddings (und optional Latents) zwischen zwei Texten.
+Interpoliert Prompt-Embeddings (und optional Latents) zwischen zwei Texten oder einer Liste mehrerer Prompts.
+
+Zwei-Punkt Variante:
 
 ```bash
 --morph-from "start prompt" --morph-to "end prompt" --morph-frames 24 \
 --morph-latent --morph-seed-start 11 --morph-seed-end 222 --morph-slerp
 ```
 
+Mehrstufige Sequenz (automatische Segment-Aufteilung der Frames):
+
+```bash
+--morph-prompts "A, B, C, D" --morph-frames 48 --morph-latent --morph-seed-start 123 --morph-seed-end 987
+```
+
 ### 5. Morph Psychedelic & Stabilisierung
 
 | Parameter | Wirkung |
 |-----------|---------|
+| `--morph-prompts "A, B, C"` | Mehrere Morph-Stufen (überschreibt from/to) |
 | `--morph-color-shift` | Kanalrotation für Farbfluss |
 | `--morph-color-intensity f` | Stärke der Farbverschiebung (0–1) |
 | `--morph-noise-pulse f` | Sinusförmige zusätzliche Latent-Rausch-Amplitude |
