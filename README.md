@@ -20,6 +20,13 @@ Leistungsfähiges, modulares Text‑zu‑Bild / Sequenz / Video Toolkit auf Basi
 
 ---
 
+### Ergänzende Dokumente
+
+- [Detaillierte Dokumentation & Nutzung (DOKU.md)](DOKU.md)
+- [Architektur & Diagramme (ARCHITEKTUR.md)](ARCHITEKTUR.md)
+
+---
+
 ## 1. Überblick & Features
 
 Zentraler Einstieg: `generate.py`.  
