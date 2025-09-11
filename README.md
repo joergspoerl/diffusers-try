@@ -7,16 +7,17 @@ Leistungsfähiges, modulares Text‑zu‑Bild / Sequenz / Video Toolkit auf Basi
 1. Überblick & Features  
 2. Installation  
 3. Schnellstart  
-4. Architektur (CLI `generate.py` & Paket `sdgen`)  
-5. Modi (single, batch, seed_cycle, interpolation, morph)  
-6. Morph – Parameter & Effekte (psychedelisch & Stabilisierung)  
-7. Video-Erstellung & Optionen  
-8. Performance & Offload  
-9. PNG & Run Metadaten  
-10. Beispiele (Basic → Fortgeschritten)  
-11. Troubleshooting  
-12. Erweiterungsideen  
-13. Lizenz
+4. Resume-Modus (Fortsetzen & Video-Experimente)  
+5. Architektur (CLI `generate.py` & Paket `sdgen`)  
+6. Modi (single, batch, seed_cycle, interpolation, morph)  
+7. Morph – Parameter & Effekte (psychedelisch & Stabilisierung)  
+8. Video-Erstellung & Optionen  
+9. Performance & Offload  
+10. PNG & Run Metadaten  
+11. Beispiele (Basic → Fortgeschritten)  
+12. Troubleshooting  
+13. Erweiterungsideen  
+14. Lizenz
 
 ---
 
@@ -39,6 +40,8 @@ Unterstützte Funktionen:
 - Seed-Cycle (kontinuierliche Seed-Variation)
 - Latent-Interpolation (Seed A → Seed B) linear oder sferisch (Slerp)
 - Prompt Morphing (Embeddings) + optional Latent Morph + Effekte
+- Resume-Modus: Fortsetzen unterbrochener Runs & Video-Experimente
+- Graceful Shutdown: Strg+C erstellt Video aus vorhandenen Frames
 - Psychedelische Morph-Effekte (Farbrotation, Warp, Noise-Puls, Orbit)
 - Zeitliche Glättung & Frame-Stabilisierung
 - Video-Build mit Blend-Frames (linear / optischer Fluss) + Ziel-Dauer
@@ -98,7 +101,58 @@ python generate.py \
 
 ---
 
-## 4. Architektur
+## 4. Resume-Modus (Fortsetzen & Video-Experimente)
+
+**NEU**: Der Resume-Modus ermöglicht es, unterbrochene Runs fortzusetzen oder aus vorhandenen Frames neue Videos mit geänderten Parametern zu erstellen.
+
+### Verwendung
+
+**Fortsetzen eines unterbrochenen Runs:**
+```bash
+# Original Run (kann mit Strg+C unterbrochen werden)
+python generate.py --config config-psy-004.json
+
+# Fortsetzen aus dem Output-Verzeichnis
+python generate.py --resume outputs/20250911-154522-psy-004-60-1
+```
+
+**Video-Experimente mit vorhandenen Frames:**
+```bash
+# Erstelle verschiedene Video-Varianten ohne Neuberechnung der Frames
+python generate.py --resume outputs/my-morph-run --video-target-duration 120  # 2min Version
+python generate.py --resume outputs/my-morph-run --video-fps 15               # 15 FPS Version
+python generate.py --resume outputs/my-morph-run --video-blend-steps 4        # Extra Blend-Frames
+```
+
+### Features
+
+- **🔄 Intelligente Frame-Erkennung**: Lädt Config automatisch, erkennt vorhandene Frames
+- **⚡ Skip vorhandene Frames**: Setzt nur ab dem letzten fehlenden Frame fort
+- **🎬 Video-Parameter-Override**: Ändert nur Video-Einstellungen ohne Neuberechnung
+- **💾 Graceful Shutdown**: Strg+C erstellt Video aus aktuell vorhandenen Frames
+- **📊 Vollständige Metadaten**: Dokumentiert Unterbrechungen und Resume-Vorgänge
+
+### Konfigurationsdatei-Verwendung
+
+**Standard-Modus (neue Config):**
+```bash
+python generate.py --config my-config.json
+```
+
+**Resume-Modus (überschreibt Video-Parameter):**
+```bash
+python generate.py --resume outputs/my-run --video-target-duration 300
+```
+
+**Im Resume-Modus wird automatisch:**
+1. Die Original-Config aus `*-config.json` geladen
+2. Der `run_id` und `run_dir` beibehalten
+3. Vorhandene Frames erkannt und übersprungen
+4. Nur geänderte Video-Parameter angewendet
+
+---
+
+## 5. Architektur
 
 Dateien:
 
@@ -117,7 +171,7 @@ Modus-Priorität: morph > interpolation > seed_cycle > batch > single.
 
 ---
 
-## 5. Modi (Kurzüberblick)
+## 6. Modi (Kurzüberblick)
 
 | Modus | Auslöser |
 |-------|----------|
@@ -146,7 +200,7 @@ Kontinuierlicher Multi-Prompt Fluss:
 
 ---
 
-## 6. Morph – Effekte & Stabilisierung
+## 7. Morph – Effekte & Stabilisierung
 
 | Flag | Wirkung |
 |------|--------|
@@ -167,7 +221,7 @@ Empfohlene „sanft“ Startwerte:
 
 ---
 
-## 7. Video
+## 8. Video
 
 | Flag | Bedeutung |
 |------|-----------|
@@ -183,7 +237,7 @@ Heuristik: Falls `--video-fps` nicht gesetzt und Ziel-Dauer > 0, wird fps dynami
 
 ---
 
-## 8. Performance & Offload
+## 9. Performance & Offload
 
 | Flag | Effekt |
 |------|--------|
@@ -203,7 +257,7 @@ Tipps:
 
 ---
 
-## 9. Metadaten
+## 10. Metadaten
 
 Jeder Run erzeugt `<run_id>.json` + PNG Text-Chunks (falls unterstützt). Auswahl pro Modus:
 
@@ -226,7 +280,7 @@ identify -verbose outputs/<run>/<file>.png | grep -i prompt -A2
 
 ---
 
-## 10. Beispiele
+## 11. Beispiele
 
 ### A) Single Bild
 
@@ -313,9 +367,29 @@ python generate.py \
   --video --video-blend-mode linear --video-blend-steps 2 --video-target-duration 10 --prompt placeholder
 ```
 
+### H) Resume & Video-Experimente
+
+**Lange Generation mit Resume-Möglichkeit:**
+```bash
+# Starte 5-Minuten psychedelisches Video (kann jederzeit mit Strg+C unterbrochen werden)
+python generate.py --config config-psy-004.json
+# → Erstellt outputs/20250911-154522-psy-004-60-1/ mit Frames
+
+# Nach Unterbrechung oder Fertigstellung: Experimentiere mit Video-Parametern
+python generate.py --resume outputs/20250911-154522-psy-004-60-1 --video-target-duration 120  # 2min Version
+python generate.py --resume outputs/20250911-154522-psy-004-60-1 --video-fps 10               # Langsamere Version  
+python generate.py --resume outputs/20250911-154522-psy-004-60-1 --video-blend-steps 4        # Extra-glatte Version
+```
+
+**Fortsetzen einer unterbrochenen Generation:**
+```bash
+# Setze Frame-Generierung da fort, wo sie unterbrochen wurde
+python generate.py --resume outputs/20250911-154522-psy-004-60-1
+```
+
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 | Problem | Ursache | Lösung |
 |---------|---------|-------|
@@ -325,19 +399,23 @@ python generate.py \
 | Unscharfe Endframes | Steps zu gering | Steps erhöhen oder Guidance moderat anheben |
 | Flow Blend ignoriert | OpenCV fehlt | `pip install opencv-python` |
 | PNG-Metadaten fehlen | Pillow PNGInfo Problem | JSON nutzen oder Pillow updaten |
+| Resume findet keine Config | Falsche Verzeichnisstruktur | Prüfen ob `*-config.json` im Zielverzeichnis vorhanden |
+| Frames werden neu berechnet | Resume-Parameter falsch | `--resume` statt `--config` verwenden |
 
 ---
 
-## 12. Erweiterungsideen
+## 13. Erweiterungsideen
 
 - GIF / WebM Export
 - Abschaltbare PNG-Metadaten (`--no-png-meta`)
 - Ping-Pong Schleifen für Morph/Interpolation
 - Weitere Effektkurven & adaptives Rauschmanagement
+- Batch-Resume für mehrere Runs gleichzeitig
+- Video-Vorschau während der Generierung
 
 ---
 
-## 13. Lizenz
+## 14. Lizenz
 
 Quellcode: Public Domain (CC0).  
 Modelle: jeweilige Modell-Lizenzen beachten.

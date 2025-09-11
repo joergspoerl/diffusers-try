@@ -52,15 +52,40 @@ def run_generation(cfg: GenerationConfig, pipe) -> List[str]:
     current_run_dir = run_dir
     current_paths = []
     
-    # Konfiguration SOFORT wegschreiben
-    try:
-        config_path = os.path.join(run_dir, f"{run_id}-config.json")
-        with open(config_path,'w',encoding='utf-8') as f:
-            import json
-            json.dump(asdict(cfg), f, indent=2, ensure_ascii=False)
-        print(f"[INFO] Konfiguration gespeichert: {config_path}")
-    except Exception as e:
-        print(f'[WARN] Konnte Config nicht schreiben: {e}')
+    # Konfiguration SOFORT wegschreiben (außer im Resume-Modus)
+    if cfg.make_run_dir:  # Nur wenn es ein neues Verzeichnis ist
+        try:
+            config_path = os.path.join(run_dir, f"{run_id}-config.json")
+            with open(config_path,'w',encoding='utf-8') as f:
+                import json
+                json.dump(asdict(cfg), f, indent=2, ensure_ascii=False)
+            print(f"[INFO] Konfiguration gespeichert: {config_path}")
+        except Exception as e:
+            print(f'[WARN] Konnte Config nicht schreiben: {e}')
+    
+    # Prüfe auf existierende Frames im Resume-Modus
+    existing_frames = []
+    if not cfg.make_run_dir:  # Resume-Modus
+        print(f"[INFO] Suche nach existierenden Frames in {run_dir}...")
+        import glob
+        pattern = os.path.join(run_dir, f"{run_id}-*.png")
+        existing_frames = sorted(glob.glob(pattern))
+        if existing_frames:
+            print(f"[INFO] Gefunden: {len(existing_frames)} existierende Frames")
+            for frame in existing_frames[:5]:  # Zeige erste 5
+                print(f"  - {os.path.basename(frame)}")
+            if len(existing_frames) > 5:
+                print(f"  ... und {len(existing_frames)-5} weitere")
+        else:
+            print("[INFO] Keine existierenden Frames gefunden")
+            
+        # Prüfe auf existierendes Video
+        video_pattern = os.path.join(run_dir, "*.mp4")
+        existing_videos = glob.glob(video_pattern)
+        if existing_videos:
+            print(f"[INFO] Existierende Videos gefunden: {[os.path.basename(v) for v in existing_videos]}")
+    
+    print(f"[INFO] Konfiguration geladen")
     # Decide mode
     paths: List[str] = []
     # Fill defaults
@@ -215,22 +240,46 @@ def run_generation(cfg: GenerationConfig, pipe) -> List[str]:
                 })
                 paths.append(fpath)
     if cfg.video and len(paths) > 1:
-        if cfg.video_target_duration and cfg.video_target_duration > 0 and cfg.video_fps <= 0:
-            # grobe fps später in build_video (wenn blends berücksichtigt) -> hier 0 lassen
-            fps = 0
-        else:
-            fps = cfg.video_fps if cfg.video_fps > 0 else (6 if len(paths) < 12 else min(30, len(paths)//2))
         vid_name = cfg.video_name or f"{cfg.run_id}.mp4"
         video_path = os.path.join(run_dir, vid_name)
-        try:
-            if interrupted:
-                print(f"[INFO] Erstelle Video aus {len(paths)} vorhandenen Frames...")
-            video.build_video(paths, video_path, fps, cfg.video_blend_mode, cfg.video_blend_steps, target_duration=cfg.video_target_duration)
-            if interrupted:
-                print(f"[INFO] Video erfolgreich erstellt: {video_path}")
-        except Exception as e:  # pragma: no cover
-            print(f"[WARN] Video fehlgeschlagen: {e}")
-            video_path = None
+        
+        # Prüfe ob Video bereits existiert (außer bei expliziter Video-Parameter-Änderung)
+        if os.path.exists(video_path) and not cfg.make_run_dir:
+            print(f"[INFO] Video bereits vorhanden: {video_path}")
+            # Prüfe ob Video-Parameter geändert wurden
+            argv_tokens = set(sys.argv[1:])
+            video_flags = ['--video-fps', '--video-blend-mode', '--video-blend-steps', '--video-target-duration']
+            video_params_changed = any(flag in argv_tokens for flag in video_flags)
+            
+            if not video_params_changed:
+                print("[INFO] Keine Video-Parameter geändert, überspringe Video-Erstellung")
+            else:
+                print("[INFO] Video-Parameter geändert, erstelle neues Video...")
+                if cfg.video_target_duration and cfg.video_target_duration > 0 and cfg.video_fps <= 0:
+                    fps = 0
+                else:
+                    fps = cfg.video_fps if cfg.video_fps > 0 else (6 if len(paths) < 12 else min(30, len(paths)//2))
+                try:
+                    video.build_video(paths, video_path, fps, cfg.video_blend_mode, cfg.video_blend_steps, target_duration=cfg.video_target_duration)
+                    print(f"[INFO] Neues Video erstellt: {video_path}")
+                except Exception as e:
+                    print(f"[WARN] Video fehlgeschlagen: {e}")
+                    video_path = None
+        else:
+            # Neues Video erstellen
+            if cfg.video_target_duration and cfg.video_target_duration > 0 and cfg.video_fps <= 0:
+                fps = 0
+            else:
+                fps = cfg.video_fps if cfg.video_fps > 0 else (6 if len(paths) < 12 else min(30, len(paths)//2))
+            try:
+                if interrupted:
+                    print(f"[INFO] Erstelle Video aus {len(paths)} vorhandenen Frames...")
+                video.build_video(paths, video_path, fps, cfg.video_blend_mode, cfg.video_blend_steps, target_duration=cfg.video_target_duration)
+                if interrupted:
+                    print(f"[INFO] Video erfolgreich erstellt: {video_path}")
+            except Exception as e:  # pragma: no cover
+                print(f"[WARN] Video fehlgeschlagen: {e}")
+                video_path = None
     elif interrupted and len(paths) > 0:
         print(f"[INFO] {len(paths)} Frames gespeichert, aber Video-Erstellung übersprungen (cfg.video=False)")
         

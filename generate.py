@@ -8,6 +8,7 @@ def parse():
     p = argparse.ArgumentParser()
     p.add_argument('--prompt', help='Prompt (optional wenn --config genutzt)')
     p.add_argument('--config', help='JSON Konfigurationsdatei als Eingabe')
+    p.add_argument('--resume', help='Fortsetzen/Resume aus bestehendem Output-Verzeichnis')
     p.add_argument('--negative', default='')
     p.add_argument('--model', default='stabilityai/sd-turbo')
     p.add_argument('--height', type=int, default=512)
@@ -61,12 +62,62 @@ def parse():
 
 def main():
     args = parse()
-    # Basis Konfiguration (evtl. aus Datei)
-    if args.config:
-        with open(args.config,'r',encoding='utf-8') as f:
+    
+    # Resume Modus: Lade Config aus bestehendem Verzeichnis
+    if args.resume:
+        resume_dir = args.resume
+        if not os.path.exists(resume_dir):
+            raise SystemExit(f'Resume-Verzeichnis existiert nicht: {resume_dir}')
+        
+        # Suche nach Config-Datei im Verzeichnis
+        config_files = [f for f in os.listdir(resume_dir) if f.endswith('-config.json')]
+        if not config_files:
+            raise SystemExit(f'Keine Config-Datei (*-config.json) in {resume_dir} gefunden')
+        
+        config_path = os.path.join(resume_dir, config_files[0])
+        print(f'[INFO] Lade Config aus: {config_path}')
+        
+        with open(config_path, 'r', encoding='utf-8') as f:
             cfg_data = json.load(f)
+        
+        # Überschreibe run_dir und run_id aus dem Resume-Verzeichnis
+        cfg_data['run_dir'] = resume_dir
+        cfg_data['run_id'] = os.path.basename(resume_dir)
+        cfg_data['make_run_dir'] = False  # Verzeichnis existiert bereits
+        
+        # CLI-Overrides für Video-Parameter erlauben
+        argv_tokens = set(sys.argv[1:])
+        def flag_present(opt: str) -> bool:
+            return opt in argv_tokens
+        def set_if(name, value, opt=None, allow_zero=True):
+            if opt and not flag_present(opt):
+                return
+            if value is None:
+                return
+            if not allow_zero and value == 0:
+                return
+            cfg_data[name] = value
+        def set_bool(name, value, opt):
+            if value and flag_present(opt):
+                cfg_data[name] = True
+        
+        # Erlaube Video-Parameter zu überschreiben
+        set_bool('video', args.video, '--video')
+        set_if('video_name', args.video_name, '--video-name')
+        set_if('video_fps', args.video_fps, '--video-fps')
+        set_if('video_blend_mode', args.video_blend_mode, '--video-blend-mode')
+        set_if('video_blend_steps', args.video_blend_steps, '--video-blend-steps')
+        set_if('video_target_duration', args.video_target_duration, '--video-target-duration')
+        
+        print(f'[INFO] Resume-Modus: Verwende existierende Frames aus {resume_dir}')
+        
     else:
-        cfg_data = {}
+        # Normaler Modus: Basis Konfiguration (evtl. aus Datei)
+        if args.config:
+            with open(args.config,'r',encoding='utf-8') as f:
+                cfg_data = json.load(f)
+        else:
+            cfg_data = {}
     # CLI Overrides: nur wenn explizit gesetzt
     argv_tokens = set(sys.argv[1:])
     def flag_present(opt: str) -> bool:
