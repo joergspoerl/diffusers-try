@@ -6,12 +6,31 @@ from .config import GenerationConfig
 from .pipeline import infer_defaults
 from . import utils
 from . import interpolate, seedcycle, morph, video
+import signal
+import sys
 
 # Placeholder: This module would be filled by migrating logic stepwise from generate.py
 
+# Global variables for graceful shutdown
+interrupted = False
+current_paths = []
+current_cfg = None
+current_run_dir = None
+
+def signal_handler(signum, frame):
+    global interrupted
+    interrupted = True
+    print("\n[INFO] Strg+C erkannt! Beende Bildgenerierung und erstelle Video aus vorhandenen Frames...")
+
 def run_generation(cfg: GenerationConfig, pipe) -> List[str]:
+    global current_paths, current_cfg, current_run_dir, interrupted
+    
+    # Signal handler für Strg+C registrieren
+    signal.signal(signal.SIGINT, signal_handler)
+    
     steps, guidance = infer_defaults(cfg.model, cfg.steps, cfg.guidance)
     overall_start = time.time()
+    
     # Prepare run directory
     if cfg.make_run_dir:
         # Morph spezifischer run_id Name falls zutreffend
@@ -27,6 +46,21 @@ def run_generation(cfg: GenerationConfig, pipe) -> List[str]:
         os.makedirs(run_dir, exist_ok=True)
     cfg.run_id = run_id
     cfg.run_dir = run_dir
+    
+    # Global variables für signal handler setzen
+    current_cfg = cfg
+    current_run_dir = run_dir
+    current_paths = []
+    
+    # Konfiguration SOFORT wegschreiben
+    try:
+        config_path = os.path.join(run_dir, f"{run_id}-config.json")
+        with open(config_path,'w',encoding='utf-8') as f:
+            import json
+            json.dump(asdict(cfg), f, indent=2, ensure_ascii=False)
+        print(f"[INFO] Konfiguration gespeichert: {config_path}")
+    except Exception as e:
+        print(f'[WARN] Konnte Config nicht schreiben: {e}')
     # Decide mode
     paths: List[str] = []
     # Fill defaults
@@ -189,13 +223,20 @@ def run_generation(cfg: GenerationConfig, pipe) -> List[str]:
         vid_name = cfg.video_name or f"{cfg.run_id}.mp4"
         video_path = os.path.join(run_dir, vid_name)
         try:
+            if interrupted:
+                print(f"[INFO] Erstelle Video aus {len(paths)} vorhandenen Frames...")
             video.build_video(paths, video_path, fps, cfg.video_blend_mode, cfg.video_blend_steps, target_duration=cfg.video_target_duration)
+            if interrupted:
+                print(f"[INFO] Video erfolgreich erstellt: {video_path}")
         except Exception as e:  # pragma: no cover
             print(f"[WARN] Video fehlgeschlagen: {e}")
             video_path = None
-    # Metadata
+    elif interrupted and len(paths) > 0:
+        print(f"[INFO] {len(paths)} Frames gespeichert, aber Video-Erstellung übersprungen (cfg.video=False)")
+        
+    # Metadata auch bei Interrupt schreiben
     duration = time.time() - overall_start
-    if cfg.write_meta:
+    if cfg.write_meta or interrupted:
         meta = {
             'run_id': run_id,
             'mode': cfg.mode,
@@ -215,7 +256,10 @@ def run_generation(cfg: GenerationConfig, pipe) -> List[str]:
             'files': [os.path.basename(p) for p in paths],
             'video': os.path.basename(video_path) if video_path else None,
             'runtime_seconds': round(duration, 3),
-            'avg_seconds_per_image': round(duration/len(paths), 3) if paths else None
+            'avg_seconds_per_image': round(duration/len(paths), 3) if paths else None,
+            'interrupted': interrupted,
+            'completed_frames': len(paths),
+            'total_planned_frames': cfg.morph_frames if hasattr(cfg, 'morph_frames') else len(paths)
         }
         utils.write_metadata(run_dir, run_id, meta)
         # Markdown Summary
@@ -243,7 +287,10 @@ def run_generation(cfg: GenerationConfig, pipe) -> List[str]:
                 ('Morph Frames', cfg.morph_frames),
                 ('Video', os.path.basename(video_path) if video_path else ''),
                 ('Runtime (s)', round(duration,3)),
-                ('Avg / Image (s)', round(duration/len(paths),3) if paths else 'n/a')
+                ('Avg / Image (s)', round(duration/len(paths),3) if paths else 'n/a'),
+                ('Interrupted', 'Yes' if interrupted else 'No'),
+                ('Completed Frames', len(paths)),
+                ('Total Planned', cfg.morph_frames if hasattr(cfg, 'morph_frames') else len(paths))
             ]
             lines = [f"# Run Summary: {run_id}", '', '## Parameter', '', '| Key | Value |', '|-----|-------|']
             for k,v in core_rows:

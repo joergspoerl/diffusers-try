@@ -27,8 +27,16 @@ def _slerp_vec(t, v0, v1, eps=1e-7):
     so = torch.sin(omega)
     return (torch.sin((1.0 - t) * omega) / so) * v0 + (torch.sin(t * omega) / so) * v1
 
+import torch, os, time
+from typing import List
+from PIL import Image
+from .config import GenerationConfig
+import math, random
+
 def generate_continuous_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
     """Global kontinuierlicher Morph über alle morph_prompts ohne Segment-Reset."""
+    from . import modes  # Import hier um zirkuläre Imports zu vermeiden
+    
     tokenizer = getattr(pipe, 'tokenizer', None)
     text_encoder = getattr(pipe, 'text_encoder', None)
     if tokenizer is None or text_encoder is None:
@@ -101,15 +109,24 @@ def generate_continuous_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List
             pass
     start_time = time.time()
     for i in range(total_frames):
+        # Prüfe auf Strg+C Interrupt
+        if modes.interrupted:
+            print(f"[INFO] Bildgenerierung nach {len(paths)} Frames unterbrochen.")
+            break
+            
         g_raw = i / (total_frames - 1) if total_frames>1 else 1.0
         g_eased = ease(g_raw)
         seg_idx, local_t = map_global_t(g_eased)
         embA = embeddings[seg_idx]
         embB = embeddings[seg_idx+1]
+        
+        # Sanftere Interpolation mit mehr Gewichtung
         if cfg.morph_slerp:
             emb = _slerp_vec(torch.tensor(local_t, device=embA.device), embA, embB)
         else:
-            emb = (1 - local_t) * embA + local_t * embB
+            # Verwende eine sanftere kubische Interpolation für bessere Übergänge
+            smooth_t = local_t * local_t * (3.0 - 2.0 * local_t)  # Smooth step
+            emb = (1 - smooth_t) * embA + smooth_t * embB
         latents = None
         if latent_start is not None and latent_end is not None:
             if cfg.morph_slerp:
@@ -189,15 +206,25 @@ def generate_continuous_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List
             'temporal_blend': cfg.morph_temporal_blend,
             'effect_curve': cfg.morph_effect_curve
         })
-    paths.append(fpath)
-    # Progress + ETA
-    elapsed = time.time() - start_time
-    done = len(paths)
-    avg = elapsed / done if done else 0.0
-    remaining = total_frames - done
-    eta = avg * remaining
-    total_est = elapsed + eta
-    print(f"[morph-cont {done}/{total_frames}] seg {seg_idx+1}/{len(seg_dists)} elapsed={elapsed:.1f}s eta={eta:.1f}s total≈{total_est:.1f}s", flush=True)
+        paths.append(fpath)
+        
+        # Update globale Variable für Signal Handler
+        modes.current_paths = paths.copy()
+        
+        # Progress + ETA für jeden Frame
+        elapsed = time.time() - start_time
+        done = len(paths)
+        avg = elapsed / done if done else 0.0
+        remaining = total_frames - done
+        eta = avg * remaining
+        total_est = elapsed + eta
+        
+        # Debug: Zeige aktuelles Prompt-Segment und Interpolation
+        current_prompt_a = prompts[seg_idx][:30] + "..." if len(prompts[seg_idx]) > 30 else prompts[seg_idx]
+        current_prompt_b = prompts[seg_idx+1][:30] + "..." if len(prompts[seg_idx+1]) > 30 else prompts[seg_idx+1]
+        
+        print(f"[morph-cont {done}/{total_frames}] seg {seg_idx+1}/{len(seg_dists)} t={local_t:.3f} elapsed={elapsed:.1f}s eta={eta:.1f}s avg={avg:.1f}s/frame", flush=True)
+        print(f"  → {current_prompt_a} → {current_prompt_b}", flush=True)
     return paths
 
 def generate_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List[str]:
