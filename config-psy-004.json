@@ -1,5 +1,5 @@
 {
-  "prompt": "psy-004",
+  "prompt": "psy-004-60-1",
   "morph_prompts": [
     "bioluminescent coral reef with swirling colors",
     "underwater cave with glowing crystals",
@@ -12,11 +12,12 @@
     "liquid crystal formations in deep water",
     "mystical underwater portal with swirling energy"
   ],
-  "morph_frames": 120,
-  "steps": 6,
-  "guidance": 0.0,
-  "model": "stabilityai/sd-turbo",
+  "morph_frames": 300,
+  "steps": 20,
+  "guidance": 7.5,
+  "model": "runwayml/stable-diffusion-v1-5",
   "half": true,
+  "cpu_offload": true,
   "morph_latent": true,
   "morph_seed_start": 1111,
   "morph_seed_end": 9999,
@@ -24,13 +25,13 @@
   "morph_ease": "ease",
   "morph_color_shift": true,
   "morph_color_intensity": 0.25,
-  "morph_noise_pulse": 0.2,
-  "morph_frame_perturb": 0.2,
-  "morph_temporal_blend": 0.35,
+  "morph_noise_pulse": 0.1,
+  "morph_frame_perturb": 0.1,
+  "morph_temporal_blend": 0.2,
   "morph_effect_curve": "center",
   "morph_smooth": true,
   "video": true,
   "video_blend_mode": "linear",
   "video_blend_steps": 2,
-  "video_target_duration": 20
+  "video_target_duration": 300
 }
