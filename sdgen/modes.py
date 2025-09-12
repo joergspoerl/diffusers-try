@@ -21,9 +21,13 @@ def signal_handler(signum, frame):
     global interrupted
     interrupted = True
     print("\n[INFO] Strg+C erkannt! Beende Bildgenerierung und erstelle Video aus vorhandenen Frames...")
+    print("[INFO] Aktueller Frame wird noch fertiggestellt...")
 
 def run_generation(cfg: GenerationConfig, pipe) -> List[str]:
     global current_paths, current_cfg, current_run_dir, interrupted
+    
+    # Reset interrupt flag
+    interrupted = False
     
     # Signal handler für Strg+C registrieren
     signal.signal(signal.SIGINT, signal_handler)
@@ -239,45 +243,47 @@ def run_generation(cfg: GenerationConfig, pipe) -> List[str]:
                     'video_extend': True
                 })
                 paths.append(fpath)
+    
+    # Video-Erstellung (auch bei Interrupt!)
+    video_path = None
     if cfg.video and len(paths) > 1:
         vid_name = cfg.video_name or f"{cfg.run_id}.mp4"
         video_path = os.path.join(run_dir, vid_name)
         
-        # Prüfe ob Video bereits existiert (außer bei expliziter Video-Parameter-Änderung)
-        if os.path.exists(video_path) and not cfg.make_run_dir:
+        # Bei Interrupt immer Video erstellen, ansonsten prüfen
+        should_create_video = interrupted
+        
+        if not interrupted and os.path.exists(video_path):
             print(f"[INFO] Video bereits vorhanden: {video_path}")
             # Prüfe ob Video-Parameter geändert wurden
             argv_tokens = set(sys.argv[1:])
             video_flags = ['--video-fps', '--video-blend-mode', '--video-blend-steps', '--video-target-duration']
             video_params_changed = any(flag in argv_tokens for flag in video_flags)
             
-            if not video_params_changed:
-                print("[INFO] Keine Video-Parameter geändert, überspringe Video-Erstellung")
-            else:
+            if video_params_changed:
                 print("[INFO] Video-Parameter geändert, erstelle neues Video...")
-                if cfg.video_target_duration and cfg.video_target_duration > 0 and cfg.video_fps <= 0:
-                    fps = 0
-                else:
-                    fps = cfg.video_fps if cfg.video_fps > 0 else (6 if len(paths) < 12 else min(30, len(paths)//2))
-                try:
-                    video.build_video(paths, video_path, fps, cfg.video_blend_mode, cfg.video_blend_steps, target_duration=cfg.video_target_duration)
-                    print(f"[INFO] Neues Video erstellt: {video_path}")
-                except Exception as e:
-                    print(f"[WARN] Video fehlgeschlagen: {e}")
-                    video_path = None
+                should_create_video = True
+            else:
+                print("[INFO] Keine Video-Parameter geändert, überspringe Video-Erstellung")
         else:
-            # Neues Video erstellen
+            should_create_video = True
+        
+        if should_create_video:
+            if interrupted:
+                print(f"[INFO] Erstelle Video aus {len(paths)} vorhandenen Frames nach Interrupt...")
+            
             if cfg.video_target_duration and cfg.video_target_duration > 0 and cfg.video_fps <= 0:
                 fps = 0
             else:
                 fps = cfg.video_fps if cfg.video_fps > 0 else (6 if len(paths) < 12 else min(30, len(paths)//2))
+            
             try:
-                if interrupted:
-                    print(f"[INFO] Erstelle Video aus {len(paths)} vorhandenen Frames...")
                 video.build_video(paths, video_path, fps, cfg.video_blend_mode, cfg.video_blend_steps, target_duration=cfg.video_target_duration)
                 if interrupted:
-                    print(f"[INFO] Video erfolgreich erstellt: {video_path}")
-            except Exception as e:  # pragma: no cover
+                    print(f"[INFO] Video erfolgreich aus partiellen Frames erstellt: {video_path}")
+                else:
+                    print(f"[INFO] Video erstellt: {video_path}")
+            except Exception as e:
                 print(f"[WARN] Video fehlgeschlagen: {e}")
                 video_path = None
     elif interrupted and len(paths) > 0:

@@ -43,8 +43,9 @@ def generate_continuous_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List
     existing_pattern = os.path.join(run_dir, f"{run_id}-*.png")
     existing_frames = sorted(glob.glob(existing_pattern))
     
-    if existing_frames and not cfg.make_run_dir:  # Resume-Modus
-        print(f"[INFO] Resume: Verwende {len(existing_frames)} existierende Frames")
+    start_frame = 0
+    if existing_frames:
+        print(f"[INFO] Resume: Gefunden {len(existing_frames)} existierende Frames")
         # Extrahiere Frame-Nummern aus Dateinamen
         existing_numbers = []
         for frame in existing_frames:
@@ -56,14 +57,16 @@ def generate_continuous_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List
             except ValueError:
                 continue
         
-        max_existing = max(existing_numbers) if existing_numbers else 0
-        total_needed = cfg.morph_frames
-        
-        if max_existing >= total_needed:
-            print(f"[INFO] Alle {total_needed} Frames bereits vorhanden, überspringe Generierung")
-            return existing_frames[:total_needed]
-        else:
-            print(f"[INFO] Fortsetzen ab Frame {max_existing + 1} von {total_needed}")
+        if existing_numbers:
+            max_existing = max(existing_numbers)
+            total_needed = cfg.morph_frames
+            
+            if max_existing >= total_needed:
+                print(f"[INFO] Alle {total_needed} Frames bereits vorhanden, überspringe Generierung")
+                return existing_frames[:total_needed]
+            else:
+                print(f"[INFO] Fortsetzen ab Frame {max_existing + 1} von {total_needed}")
+                start_frame = max_existing  # Nächster Frame nach dem letzten existierenden
     
     tokenizer = getattr(pipe, 'tokenizer', None)
     text_encoder = getattr(pipe, 'text_encoder', None)
@@ -112,13 +115,16 @@ def generate_continuous_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List
     prev_img_tensor = None
     import numpy as np
     
-    # Sammle existierende Frames wenn im Resume-Modus
-    if existing_frames and not cfg.make_run_dir:
-        paths = existing_frames.copy()
-        start_frame = len(existing_frames)
-        print(f"[INFO] Starte ab Frame {start_frame + 1}")
+    # Sammle existierende Frames wenn vorhanden (für korrekte Reihenfolge)
+    if existing_frames:
+        # Füge existierende Frames zur Liste hinzu
+        for i in range(min(len(existing_frames), cfg.morph_frames)):
+            frame_path = os.path.join(run_dir, f"{run_id}-{i+1:03d}.png")
+            if os.path.exists(frame_path):
+                paths.append(frame_path)
+        print(f"[INFO] Verwende {len(paths)} existierende Frames, generiere ab Frame {start_frame + 1}")
     else:
-        start_frame = 0
+        print(f"[INFO] Starte neue Generierung von Frame 1")
     def effect_weight(raw_t: float) -> float:
         c = cfg.morph_effect_curve
         if c == 'linear': return raw_t
@@ -145,9 +151,9 @@ def generate_continuous_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List
             pass
     start_time = time.time()
     for i in range(start_frame, total_frames):
-        # Prüfe auf Strg+C Interrupt
+        # Prüfe auf Strg+C Interrupt als ALLERERSTES
         if modes.interrupted:
-            print(f"[INFO] Bildgenerierung nach {len(paths)} Frames unterbrochen.")
+            print(f"[INFO] Bildgenerierung bei Frame {i+1}/{total_frames} unterbrochen. Erstelle Video aus {len(paths)} vorhandenen Frames...")
             break
         
         # Prüfe ob Frame bereits existiert
@@ -155,10 +161,13 @@ def generate_continuous_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List
         fname = f"{cfg.run_id}-{frame_num:03d}.png"
         fpath = os.path.join(run_dir, fname)
         
-        if os.path.exists(fpath) and not cfg.make_run_dir:
+        if os.path.exists(fpath):
             print(f"[INFO] Frame {frame_num} existiert bereits, überspringe...")
-            if fpath not in paths:
-                paths.append(fpath)
+            paths.append(fpath)
+            # Prüfe auch nach dem Hinzufügen auf Interrupt
+            if modes.interrupted:
+                print(f"[INFO] Interrupt während Frame-Übersprung erkannt.")
+                break
             continue
             
         g_raw = i / (total_frames - 1) if total_frames>1 else 1.0
@@ -198,8 +207,18 @@ def generate_continuous_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List
             kw['latents'] = latents.clone()
         if neg_emb is not None and cfg.guidance and cfg.guidance > 1.0:
             kw['negative_prompt_embeds'] = neg_emb
-        result = pipe(**kw)
-        img: Image.Image = result.images[0]
+        
+        print(f"[INFO] Generiere Frame {frame_num}/{total_frames}...")
+        try:
+            result = pipe(**kw)
+            img: Image.Image = result.images[0]
+        except KeyboardInterrupt:
+            print(f"[INFO] KeyboardInterrupt während Pipeline-Ausführung - breche ab.")
+            modes.interrupted = True
+            break
+        except Exception as e:
+            print(f"[ERROR] Fehler bei Frame {frame_num}: {e}")
+            continue
         # Pixel Effekte
         if cfg.morph_color_shift or cfg.morph_frame_perturb > 0:
             arr = np.array(img).astype('float32')
@@ -254,6 +273,11 @@ def generate_continuous_morph(cfg: GenerationConfig, pipe, run_dir: str) -> List
             'effect_curve': cfg.morph_effect_curve
         })
         paths.append(fpath)
+        
+        # Prüfe auf Interrupt nach Speichern
+        if modes.interrupted:
+            print(f"[INFO] Bildgenerierung nach Frame {frame_num} unterbrochen.")
+            break
         
         # Update globale Variable für Signal Handler
         modes.current_paths = paths.copy()
