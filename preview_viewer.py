@@ -39,9 +39,17 @@ class ImagePlayer(QThread):
         self.current_interpolation_step = 0
         
     def set_images(self, image_files: List[str]):
-        """Set the image sequence"""
+        """Set the image sequence, preserving current position if possible"""
+        old_count = len(self.image_files) if self.image_files else 0
         self.image_files = image_files
-        self.current_index = 0
+        
+        # Keep current index if still valid, otherwise reset to 0
+        if self.current_index >= len(image_files):
+            self.current_index = 0
+        # If we had no images before, start at 0
+        elif old_count == 0:
+            self.current_index = 0
+        # Otherwise keep current position
         
     def set_fps(self, fps: int):
         """Set playback FPS"""
@@ -370,7 +378,7 @@ class PreviewViewer(QMainWindow):
         controls_layout.addWidget(QLabel("FPS:"))
         self.fps_spin = QSpinBox()
         self.fps_spin.setRange(1, 60)
-        self.fps_spin.setValue(10)
+        self.fps_spin.setValue(50)  # Default auf 50 FPS
         self.fps_spin.valueChanged.connect(self.on_fps_changed)
         controls_layout.addWidget(self.fps_spin)
         
@@ -427,7 +435,7 @@ class PreviewViewer(QMainWindow):
         interpolation_layout.addWidget(QLabel("Schritte:"))
         self.interpolation_steps_spin = QSpinBox()
         self.interpolation_steps_spin.setRange(2, 20)
-        self.interpolation_steps_spin.setValue(5)
+        self.interpolation_steps_spin.setValue(20)  # Default auf 20 Schritte
         self.interpolation_steps_spin.valueChanged.connect(self.on_interpolation_steps_changed)
         interpolation_layout.addWidget(self.interpolation_steps_spin)
         
@@ -469,6 +477,13 @@ class PreviewViewer(QMainWindow):
         self.blend_frames_spin.setEnabled(False)
         self.blend_alpha_slider.setEnabled(False) 
         self.interpolation_steps_spin.setEnabled(False)
+        
+        # Activate Zwischenframes by default
+        self.interpolate_check.setChecked(True)
+        self.toggle_interpolation(True)  # Activate interpolation mode
+        
+        # Set initial FPS to player
+        self.player.set_fps(50)
         
     def refresh_folders(self):
         """Refresh the folder list"""
@@ -534,16 +549,25 @@ class PreviewViewer(QMainWindow):
             image_files.sort()
             
             # Update player
+            old_image_count = len(self.player.image_files) if self.player.image_files else 0
             self.player.set_images(image_files)
             
             # Update UI
             self.frame_slider.setRange(0, max(0, len(image_files) - 1))
-            self.frame_slider.setValue(0)
+            
+            # Only reset slider if we had no images before or current position is invalid
+            if old_image_count == 0 or self.frame_slider.value() >= len(image_files):
+                self.frame_slider.setValue(0)
+            # Otherwise keep current slider position
             
             self.status_label.setText(f"Geladen: {len(image_files)} Bilder")
             
-            # Display first image if available
-            if image_files:
+            # Display current image if available
+            if image_files and self.player.current_index < len(image_files):
+                self.display_image(image_files[self.player.current_index])
+                self.update_frame_info(self.player.current_index + 1, len(image_files))
+            elif image_files:
+                # Fallback if index is somehow invalid
                 self.display_image(image_files[0])
                 self.update_frame_info(1, len(image_files))
             else:
