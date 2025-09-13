@@ -5,8 +5,8 @@ Diffusers Preview Viewer - Standalone Image Viewer for Output Folders
 
 import sys
 import os
-import glob
 import time
+import glob
 from typing import List, Optional
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -34,6 +34,9 @@ class ImagePlayer(QThread):
         self.blend_mode = False
         self.blend_frames = 3
         self.blend_alpha = 0.3
+        self.interpolate_frames = False
+        self.interpolation_steps = 5
+        self.current_interpolation_step = 0
         
     def set_images(self, image_files: List[str]):
         """Set the image sequence"""
@@ -55,6 +58,16 @@ class ImagePlayer(QThread):
     def set_blend_alpha(self, alpha: float):
         """Set blend alpha value"""
         self.blend_alpha = max(0.0, min(1.0, alpha))
+        
+    def set_interpolate_frames(self, enabled: bool):
+        """Enable/disable frame interpolation"""
+        self.interpolate_frames = enabled
+        self.current_interpolation_step = 0
+        
+    def set_interpolation_steps(self, steps: int):
+        """Set number of interpolation steps between frames"""
+        self.interpolation_steps = max(2, steps)
+        self.current_interpolation_step = 0
         
     def play(self):
         """Start playback"""
@@ -102,13 +115,60 @@ class ImagePlayer(QThread):
             self.frameChanged.emit(self.current_index + 1, len(self.image_files))
             
     def emit_blended_frame(self):
-        """Create and emit blended frame"""
+        """Create and emit blended frame with optional interpolation"""
         if not self.image_files:
             return
             
         try:
             from PyQt6.QtGui import QPixmap, QPainter
             
+            # Handle frame interpolation for smoother transitions
+            if self.interpolate_frames and self.interpolation_steps > 2:
+                # Calculate current and next frame indices
+                current_idx = self.current_index % len(self.image_files)
+                next_idx = (current_idx + 1) % len(self.image_files)
+                
+                # Load both frames
+                current_pixmap = QPixmap(self.image_files[current_idx])
+                next_pixmap = QPixmap(self.image_files[next_idx])
+                
+                if current_pixmap.isNull() or next_pixmap.isNull():
+                    return
+                
+                # Calculate smooth interpolated alpha
+                step_progress = self.current_interpolation_step / (self.interpolation_steps - 1)
+                
+                # Use full intensity (100%) for interpolation mode instead of blend_alpha
+                final_alpha = step_progress
+                
+                # Create interpolated frame
+                result = QPixmap(current_pixmap.size())
+                result.fill()
+                
+                painter = QPainter(result)
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                
+                # Draw current frame (always full opacity)
+                painter.setOpacity(1.0)
+                painter.drawPixmap(0, 0, current_pixmap)
+                
+                # Draw next frame with interpolated alpha (blend over current)
+                painter.setOpacity(final_alpha)
+                painter.drawPixmap(0, 0, next_pixmap.scaled(current_pixmap.size()))
+                
+                painter.end()
+                
+                # Increment interpolation step
+                self.current_interpolation_step += 1
+                if self.current_interpolation_step >= self.interpolation_steps:
+                    self.current_interpolation_step = 0
+                    # Only advance to next frame when interpolation cycle is complete
+                    self.current_index = (self.current_index + 1) % len(self.image_files)
+                
+                self.blendChanged.emit(result)
+                return
+            
+            # Original multi-frame blending for non-interpolation mode
             # Get frames to blend
             frames_to_blend = []
             for i in range(self.blend_frames):
@@ -158,10 +218,17 @@ class ImagePlayer(QThread):
                 else:
                     self.imageChanged.emit(self.image_files[self.current_index])
                     
-                self.frameChanged.emit(self.current_index + 1, len(self.image_files))
-                
-                # Move to next frame
-                self.current_index = (self.current_index + 1) % len(self.image_files)
+                # Handle frame advancement with interpolation consideration
+                if not (self.blend_mode and self.interpolate_frames and self.interpolation_steps > 2):
+                    # Normal frame advancement
+                    self.frameChanged.emit(self.current_index + 1, len(self.image_files))
+                    
+                    # Advance to next frame
+                    self.current_index = (self.current_index + 1) % len(self.image_files)
+                else:
+                    # Interpolation mode: only emit frame change, don't advance yet
+                    # Frame advancement is handled in emit_blended_frame()
+                    self.frameChanged.emit(self.current_index + 1, len(self.image_files))
                 
                 # Wait based on FPS
                 self.msleep(int(1000 / self.fps))
@@ -347,6 +414,25 @@ class PreviewViewer(QMainWindow):
         
         blend_layout.addStretch()
         
+        # Interpolation controls layout
+        interpolation_layout = QHBoxLayout()
+        main_layout.addLayout(interpolation_layout)
+        
+        # Interpolation checkbox
+        self.interpolate_check = QCheckBox("🎬 Zwischenframes")
+        self.interpolate_check.toggled.connect(self.toggle_interpolation)
+        interpolation_layout.addWidget(self.interpolate_check)
+        
+        # Interpolation steps control
+        interpolation_layout.addWidget(QLabel("Schritte:"))
+        self.interpolation_steps_spin = QSpinBox()
+        self.interpolation_steps_spin.setRange(2, 20)
+        self.interpolation_steps_spin.setValue(5)
+        self.interpolation_steps_spin.valueChanged.connect(self.on_interpolation_steps_changed)
+        interpolation_layout.addWidget(self.interpolation_steps_spin)
+        
+        interpolation_layout.addStretch()
+        
         # Frame control layout
         frame_layout = QHBoxLayout()
         main_layout.addLayout(frame_layout)
@@ -378,6 +464,11 @@ class PreviewViewer(QMainWindow):
         self.status_label = QLabel("Bereit")
         self.status_label.setStyleSheet("QLabel { color: #90EE90; padding: 5px; }")
         main_layout.addWidget(self.status_label)
+        
+        # Initialize UI state - both options available independently
+        self.blend_frames_spin.setEnabled(False)
+        self.blend_alpha_slider.setEnabled(False) 
+        self.interpolation_steps_spin.setEnabled(False)
         
     def refresh_folders(self):
         """Refresh the folder list"""
@@ -543,20 +634,35 @@ class PreviewViewer(QMainWindow):
         self.player.set_fps(fps)
         
     def toggle_blend_mode(self, enabled: bool):
-        """Toggle blend mode"""
+        """Toggle normal blend mode"""
         self.player.set_blend_mode(enabled)
         
-        # Update UI state
-        self.blend_frames_spin.setEnabled(enabled)
-        self.blend_alpha_slider.setEnabled(enabled)
-        
         if enabled:
-            self.status_label.setText("Überblendmodus aktiviert")
+            # Disable interpolation checkbox and controls to avoid conflicts
+            self.interpolate_check.setChecked(False)
+            self.interpolate_check.setEnabled(False)
+            self.interpolation_steps_spin.setEnabled(False)
+            self.player.set_interpolate_frames(False)
+            
+            # Enable normal blend controls
+            self.blend_frames_spin.setEnabled(True)
+            self.blend_alpha_slider.setEnabled(True)
+            
+            self.status_label.setText("Normaler Überblendmodus aktiviert")
+            
             # Refresh current frame
             if self.player.image_files:
                 self.player.emit_blended_frame()
         else:
-            self.status_label.setText("Überblendmodus deaktiviert")
+            # Disable blend mode
+            self.blend_frames_spin.setEnabled(False)
+            self.blend_alpha_slider.setEnabled(False)
+            
+            # Re-enable interpolation checkbox
+            self.interpolate_check.setEnabled(True)
+            
+            self.status_label.setText("Normaler Überblendmodus deaktiviert")
+            
             # Show normal frame
             if self.player.image_files and self.player.current_index < len(self.player.image_files):
                 self.display_image(self.player.image_files[self.player.current_index])
@@ -577,6 +683,47 @@ class PreviewViewer(QMainWindow):
         
         # Refresh if blend mode is active
         if self.blend_check.isChecked() and self.player.image_files:
+            self.player.emit_blended_frame()
+    
+    def toggle_interpolation(self, enabled: bool):
+        """Toggle frame interpolation"""
+        self.player.set_interpolate_frames(enabled)
+        
+        if enabled:
+            # Activate interpolation blend mode independently
+            self.player.set_blend_mode(True)
+            self.interpolation_steps_spin.setEnabled(True)
+            
+            # Disable normal blend checkbox and controls to avoid conflicts
+            self.blend_check.setChecked(False)
+            self.blend_check.setEnabled(False)
+            self.blend_frames_spin.setEnabled(False)
+            self.blend_alpha_slider.setEnabled(False)
+            
+            self.status_label.setText("Zwischenframes-Modus aktiviert (100% Intensität)")
+        else:
+            # Deactivate interpolation
+            self.player.set_blend_mode(False)
+            self.player.set_interpolate_frames(False)
+            self.interpolation_steps_spin.setEnabled(False)
+            
+            # Re-enable normal blend checkbox
+            self.blend_check.setEnabled(True)
+            self.status_label.setText("Zwischenframes-Modus deaktiviert")
+        
+        # Refresh display
+        if self.player.image_files:
+            if enabled:
+                self.player.emit_blended_frame()
+            else:
+                self.display_image(self.player.image_files[self.player.current_index])
+            
+    def on_interpolation_steps_changed(self, steps: int):
+        """Handle interpolation steps change"""
+        self.player.set_interpolation_steps(steps)
+        
+        # Refresh if interpolation is active
+        if self.interpolate_check.isChecked() and self.blend_check.isChecked() and self.player.image_files:
             self.player.emit_blended_frame()
         
     def on_frame_slider_changed(self, value: int):
