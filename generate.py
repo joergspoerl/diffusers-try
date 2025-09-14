@@ -217,31 +217,73 @@ def main():
             print('[WARN] Konnte vollständige Config nicht schreiben:', e)
     print(json.dumps({'count': len(paths)}, indent=2))
 
+def process_config(config_path):
+    """Verarbeite eine einzelne Config-Datei"""
+    print(f"[INFO] Lade Config aus: {config_path}")
+    
+    with open(config_path, 'r', encoding='utf-8') as f:
+        cfg_data = json.load(f)
+    
+    # Validierung: Prompt muss vorhanden sein
+    if not cfg_data.get('prompt') and not cfg_data.get('morph_prompts') and not (cfg_data.get('morph_from') and cfg_data.get('morph_to')):
+        raise SystemExit('Fehlender Prompt: prompt oder Morph-Parameter in Config angeben')
+    
+    cfg = GenerationConfig(**cfg_data)
+    
+    print('[DEBUG] Konfiguration:')
+    try:
+        print(json.dumps(cfg_data, indent=2, ensure_ascii=False))
+    except Exception:
+        pass
+    
+    pipe = build_pipeline(cfg.model, cfg.half)
+    paths = run_generation(cfg, pipe)
+    
+    print('Generierte Dateien:')
+    for p in paths:
+        print(' -', p)
+    
+    # Speichere vollständige Config als separate Datei
+    if cfg.run_dir and cfg.run_id:
+        full_cfg_path = os.path.join(cfg.run_dir, f"{cfg.run_id}-config.json")
+        try:
+            with open(full_cfg_path,'w',encoding='utf-8') as f:
+                json.dump(asdict(cfg), f, indent=2, ensure_ascii=False)
+            print(f"Konfiguration gespeichert: {full_cfg_path}")
+        except Exception as e:
+            print('[WARN] Konnte vollständige Config nicht schreiben:', e)
+    
+    return paths
+
+
 def batch_mode(input_dir, output_dir, poll_interval=5):
     """Batch-Modus: Überwacht input_dir auf neue Configs und verarbeitet sie"""
     done_dir = os.path.join(output_dir, "done")
     os.makedirs(done_dir, exist_ok=True)
     print(f"[Batch] Überwache {input_dir} auf neue Configs...")
+    
     while True:
         configs = [f for f in os.listdir(input_dir) if f.endswith('.json')]
         if configs:
             for config_file in configs:
                 config_path = os.path.join(input_dir, config_file)
                 print(f"[Batch] Verarbeite {config_file}")
-                # Starte Generierung mit config_path
+                
                 try:
-                    # ...hier die eigentliche Generierungslogik aufrufen...
-                    # z.B. main(config_path) oder subprocess
-                    # main(config_path)  # falls main() die Generierung übernimmt
-                    # Dummy: time.sleep(2)
-                    print(f"[Batch] Fertig: {config_file}")
+                    # Verarbeite Config-Datei
+                    paths = process_config(config_path)
+                    print(f"[Batch] Fertig: {config_file} ({len(paths)} Dateien generiert)")
                 except Exception as e:
                     print(f"[Batch] Fehler bei {config_file}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                
                 # Verschiebe Config in done-Ordner
                 shutil.move(config_path, os.path.join(done_dir, config_file))
                 print(f"[Batch] Verschoben nach {done_dir}")
         else:
             print("[Batch] Keine neuen Configs gefunden. Warten...")
+        
         time.sleep(poll_interval)
 
 if __name__ == '__main__':  # pragma: no cover
