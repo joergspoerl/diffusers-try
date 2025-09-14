@@ -37,9 +37,9 @@ class ImagePlayer(QThread):
         self.loop_mode = True
         self.blend_mode = False
         self.blend_frames = 3
-        self.blend_alpha = 0.3
+        self.blend_alpha = 1.0
         self.interpolate_frames = False
-        self.interpolation_steps = 5
+        self.interpolation_steps = 50
         self.current_interpolation_step = 0
         
     def set_images(self, image_files: List[str]):
@@ -261,17 +261,17 @@ class VideoExporter(QThread):
         self.output_path = ""
         self.fps = 25
         self.blend_frames = 1
-        self.blend_alpha = 0.3
+        self.blend_alpha = 1.0
         self.interpolate_frames = False
-        self.interpolation_steps = 5
+        self.interpolation_steps = 50
         self.video_quality = "high"
         self.upscale_factor = 1
         self.video_codec = "libx264"
         self.video_bitrate = "auto"
         
     def set_export_settings(self, image_files, output_path, fps, 
-                          blend_frames=1, blend_alpha=0.3, 
-                          interpolate_frames=False, interpolation_steps=5,
+                          blend_frames=1, blend_alpha=1.0, 
+                          interpolate_frames=False, interpolation_steps=50,
                           video_quality="high", upscale_factor=1,
                           video_codec="libx264", video_bitrate="auto"):
         """Set export settings"""
@@ -456,8 +456,12 @@ class VideoExporter(QThread):
     
     def _build_ffmpeg_command(self, temp_dir, output_path):
         """Build FFmpeg command based on quality settings"""
+        # Find FFmpeg executable (prioritize local installation)
+        from sdgen.utils import find_ffmpeg
+        ffmpeg_exe = find_ffmpeg() or "ffmpeg"  # fallback to PATH
+        
         base_cmd = [
-            "ffmpeg", "-y",
+            ffmpeg_exe, "-y",
             "-framerate", str(self.fps),
             "-i", os.path.join(temp_dir, "frame_%06d.png"),
             "-c:v", self.video_codec,
@@ -757,9 +761,9 @@ class VideoExportDialog(QDialog):
         
         # Get viewer settings if enabled
         blend_frames = 1
-        blend_alpha = 0.3
+        blend_alpha = 1.0
         interpolate_frames = False
-        interpolation_steps = 5
+        interpolation_steps = 50
         
         if self.copy_settings_check.isChecked():
             if self.parent_viewer.blend_check.isChecked():
@@ -1028,8 +1032,8 @@ class PreviewViewer(QMainWindow):
         # Blend alpha control
         blend_layout.addWidget(QLabel("Intensität:"))
         self.blend_alpha_slider = QSlider(Qt.Orientation.Horizontal)
-        self.blend_alpha_slider.setRange(10, 80)
-        self.blend_alpha_slider.setValue(30)
+        self.blend_alpha_slider.setRange(10, 100)
+        self.blend_alpha_slider.setValue(100)  # Default 100%
         self.blend_alpha_slider.valueChanged.connect(self.on_blend_alpha_changed)
         self.blend_alpha_slider.setMaximumWidth(100)
         blend_layout.addWidget(self.blend_alpha_slider)
@@ -1052,8 +1056,8 @@ class PreviewViewer(QMainWindow):
         # Interpolation steps control
         interpolation_layout.addWidget(QLabel("Schritte:"))
         self.interpolation_steps_spin = QSpinBox()
-        self.interpolation_steps_spin.setRange(2, 20)
-        self.interpolation_steps_spin.setValue(20)  # Default auf 20 Schritte
+        self.interpolation_steps_spin.setRange(2, 200)
+        self.interpolation_steps_spin.setValue(50)  # Default auf 50 Schritte
         self.interpolation_steps_spin.valueChanged.connect(self.on_interpolation_steps_changed)
         interpolation_layout.addWidget(self.interpolation_steps_spin)
         

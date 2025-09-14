@@ -30,6 +30,42 @@ def write_metadata(run_dir: str, run_id: str, meta: dict):
     except Exception:
         return None
 
+def find_ffmpeg():
+    """Find FFmpeg executable - prioritize local project installation"""
+    import shutil
+    
+    # Get project root directory (go up from sdgen to project root)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(current_dir)
+    
+    # Priority order: Local project FFmpeg first, then system installations
+    possible_paths = [
+        # Local project FFmpeg (highest priority)
+        os.path.join(project_root, "ffmpeg", "ffmpeg-master-latest-win64-gpl", "bin", "ffmpeg.exe"),
+        os.path.join(project_root, "ffmpeg", "bin", "ffmpeg.exe"),
+        os.path.join(project_root, "bin", "ffmpeg.exe"),
+        os.path.join(project_root, "ffmpeg.exe"),
+        
+        # System PATH
+        "ffmpeg",  # Unix/Linux in PATH
+        "ffmpeg.exe",  # Windows in PATH
+        
+        # Common Windows system installations
+        r"C:\ffmpeg\bin\ffmpeg.exe",
+        r"C:\Program Files\ffmpeg\bin\ffmpeg.exe", 
+        r"C:\Program Files (x86)\ffmpeg\bin\ffmpeg.exe",
+    ]
+    
+    for path in possible_paths:
+        # Check if file exists directly (for absolute paths)
+        if os.path.isfile(path):
+            return path
+        # Check if command exists in PATH (for relative commands)
+        elif shutil.which(path):
+            return shutil.which(path)
+            
+    return None
+
 def save_image_with_meta(img, path: str, meta: dict):
     """Speichert PNG mit einfachen Text-Metadaten. Fällt still auf normales Speichern zurück."""
     try:
