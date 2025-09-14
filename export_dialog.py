@@ -752,21 +752,37 @@ class SimpleVideoExportDialog(QDialog):
     
     def qpixmap_to_numpy(self, pixmap):
         """Convert QPixmap to numpy array for FFmpeg"""
-        # Convert QPixmap to QImage
-        image = pixmap.toImage()
-        
-        # Convert to RGB format
-        if image.format() != QImage.Format.Format_RGB888:
-            image = image.convertToFormat(QImage.Format.Format_RGB888)
-        
-        # Get image data
-        ptr = image.constBits()
-        ptr.setsize(image.sizeInBytes())
-        
-        # Create numpy array
-        arr = np.frombuffer(ptr, np.uint8).reshape((image.height(), image.width(), 3))
-        
-        return arr
+        try:
+            print(f"🔄 Converting QPixmap {pixmap.width()}x{pixmap.height()} to numpy...")
+            import numpy as np
+            from PyQt6.QtGui import QImage
+            
+            # Convert QPixmap to QImage
+            image = pixmap.toImage()
+            print(f"🔄 QImage created: {image.width()}x{image.height()}, format: {image.format()}")
+            
+            # Convert to RGB format
+            if image.format() != QImage.Format.Format_RGB888:
+                print("🔄 Converting to RGB888 format...")
+                image = image.convertToFormat(QImage.Format.Format_RGB888)
+            
+            # Get image data
+            print("🔄 Getting image data...")
+            ptr = image.constBits()
+            ptr.setsize(image.sizeInBytes())
+            print(f"🔄 Image data size: {image.sizeInBytes()} bytes")
+            
+            # Create numpy array
+            print("🔄 Creating numpy array...")
+            arr = np.frombuffer(ptr, np.uint8).reshape((image.height(), image.width(), 3))
+            print(f"✅ Numpy array created: {arr.shape}, dtype: {arr.dtype}")
+            
+            return arr
+        except Exception as e:
+            print(f"❌ CRITICAL ERROR in qpixmap_to_numpy: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
         
     def create_video_from_folder(self, folder_path, output_path, fps, quality, upscale, codec, 
                                 use_interpolation=False, interp_steps=20, blend_intensity=0.3):
@@ -975,9 +991,12 @@ class SimpleVideoExportDialog(QDialog):
         self.continue_video_creation_in_memory(pixmaps_list)
     
     def continue_video_creation_in_memory(self, pixmaps_list):
-        """Continue with video creation using in-memory pixmaps"""
+        """Continue with video creation using in-memory pixmaps - but save as temp files for large frames"""
+        print(f"🎬 Starting continue_video_creation_in_memory with {len(pixmaps_list)} pixmaps")
         import subprocess
         import numpy as np
+        import os
+        import tempfile
         from PyQt6.QtGui import QImage
         from PyQt6.QtCore import Qt
         
@@ -991,13 +1010,40 @@ class SimpleVideoExportDialog(QDialog):
         codec = params['codec']
         
         print(f"🔄 Creating video from {len(pixmaps_list)} in-memory frames")
+        print(f"🔄 Output: {output_path}, FPS: {fps}, Quality: {quality}, Upscale: {upscale}")
         
-        # Try to find FFmpeg
-        ffmpeg_path = self.find_ffmpeg()
-        if not ffmpeg_path:
-            self.status_label.setText("❌ FFmpeg nicht gefunden!")
-            self.export_btn.setEnabled(True)
-            return
+        # Calculate frame size after upscaling
+        base_width = pixmaps_list[0].width()
+        base_height = pixmaps_list[0].height()
+        
+        if upscale != "1x":
+            upscale_factor = self.parse_upscale_factor(upscale)
+            if upscale_factor != 1:
+                base_width = int(base_width * upscale_factor)
+                base_height = int(base_height * upscale_factor)
+        
+        frame_size_mb = (base_width * base_height * 3) / (1024 * 1024)
+        print(f"🔄 Estimated frame size: {frame_size_mb:.1f} MB")
+        
+        # For large frames (>10MB), use temporary files instead of pipe
+        use_temp_files = frame_size_mb > 10
+        
+        if use_temp_files:
+            print("🔄 Using temporary files approach for large frames")
+            return self.continue_video_creation_with_temp_files(pixmaps_list)
+        else:
+            print("🔄 Using pipe approach for small frames")
+            return self.continue_video_creation_with_pipe(pixmaps_list)
+        
+        # Calculate final frame size with upscaling
+        base_width = pixmaps_list[0].width()
+        base_height = pixmaps_list[0].height()
+        
+        if upscale != "1x":
+            upscale_factor = self.parse_upscale_factor(upscale)
+            if upscale_factor != 1:
+                base_width = int(base_width * upscale_factor)
+                base_height = int(base_height * upscale_factor)
         
         # Set up FFmpeg command for pipe input
         output_path = self.get_unique_filename(output_path)
@@ -1005,7 +1051,7 @@ class SimpleVideoExportDialog(QDialog):
             ffmpeg_path, 
             '-f', 'rawvideo',
             '-vcodec', 'rawvideo',
-            '-s', f'{pixmaps_list[0].width()}x{pixmaps_list[0].height()}',  # Use first frame size
+            '-s', f'{base_width}x{base_height}',  # Use final size after upscaling
             '-pix_fmt', 'rgb24',
             '-r', str(fps),
             '-i', '-',  # Read from pipe
@@ -1026,45 +1072,110 @@ class SimpleVideoExportDialog(QDialog):
         
         try:
             # Start FFmpeg process
+            print("🎬 Starting FFmpeg process...")
             self.status_label.setText("🎬 Erstelle Video...")
             process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            print(f"🎬 FFmpeg process started with PID: {process.pid}")
             
             # Send frames to FFmpeg
+            print(f"🎬 Starting to send {len(pixmaps_list)} frames to FFmpeg...")
             for i, pixmap in enumerate(pixmaps_list):
-                # Convert QPixmap to numpy array
-                frame_array = self.qpixmap_to_numpy(pixmap)
-                
-                # Apply upscaling if needed
-                if upscale != "1x":
-                    upscale_factor = self.parse_upscale_factor(upscale)
-                    if upscale_factor != 1:
-                        frame_array = self.upscale_frame(frame_array, upscale_factor)
-                
-                # Send frame to FFmpeg
-                process.stdin.write(frame_array.tobytes())
-                
-                # Update progress
-                progress = int((i + 1) / len(pixmaps_list) * 100)
-                self.progress_bar.setValue(progress)
-                self.status_label.setText(f"🎬 Frame {i+1}/{len(pixmaps_list)} ({progress}%)")
+                try:
+                    if i % 10 == 0:  # Log every 10th frame
+                        print(f"🎬 Processing frame {i+1}/{len(pixmaps_list)}")
+                    
+                    print(f"🔄 Frame {i+1}: QPixmap size {pixmap.width()}x{pixmap.height()}")
+                    
+                    # Apply upscaling if needed (do it on QPixmap before conversion)
+                    scaled_pixmap = pixmap
+                    if upscale != "1x":
+                        print(f"🔄 Frame {i+1}: Applying upscaling {upscale}")
+                        upscale_factor = self.parse_upscale_factor(upscale)
+                        if upscale_factor != 1:
+                            from PyQt6.QtCore import Qt
+                            new_width = int(pixmap.width() * upscale_factor)
+                            new_height = int(pixmap.height() * upscale_factor)
+                            print(f"🔄 Frame {i+1}: Scaling to {new_width}x{new_height}")
+                            scaled_pixmap = pixmap.scaled(new_width, new_height, 
+                                                        Qt.AspectRatioMode.IgnoreAspectRatio,
+                                                        Qt.TransformationMode.SmoothTransformation)
+                    
+                    # Convert QPixmap to numpy array
+                    print(f"🔄 Frame {i+1}: Converting to numpy...")
+                    frame_array = self.qpixmap_to_numpy(scaled_pixmap)
+                    print(f"🔄 Frame {i+1}: Numpy array shape {frame_array.shape}")
+                    
+                    # Send frame to FFmpeg in chunks to avoid pipe overflow
+                    print(f"🔄 Frame {i+1}: Sending {frame_array.nbytes} bytes to FFmpeg in chunks...")
+                    frame_bytes = frame_array.tobytes()
+                    chunk_size = 65536  # 64KB chunks
+                    bytes_written = 0
+                    
+                    for chunk_start in range(0, len(frame_bytes), chunk_size):
+                        chunk_end = min(chunk_start + chunk_size, len(frame_bytes))
+                        chunk = frame_bytes[chunk_start:chunk_end]
+                        try:
+                            process.stdin.write(chunk)
+                            process.stdin.flush()  # Force write
+                            bytes_written += len(chunk)
+                        except Exception as write_error:
+                            print(f"❌ Error writing chunk {chunk_start}-{chunk_end}: {write_error}")
+                            raise
+                    
+                    print(f"✅ Frame {i+1}: Successfully sent {bytes_written} bytes to FFmpeg")
+                    
+                    # Update progress
+                    progress = int((i + 1) / len(pixmaps_list) * 100)
+                    self.progress_bar.setValue(progress)
+                    self.status_label.setText(f"🎬 Frame {i+1}/{len(pixmaps_list)} ({progress}%)")
+                    
+                except Exception as frame_error:
+                    print(f"❌ CRITICAL ERROR processing frame {i+1}: {frame_error}")
+                    import traceback
+                    traceback.print_exc()
+                    self.status_label.setText(f"❌ Fehler bei Frame {i+1}: {str(frame_error)}")
+                    # Try to continue with next frame
+                    continue
             
-            # Close stdin and wait
-            process.stdin.close()
-            stdout, stderr = process.communicate()
+            print("🎬 All frames sent to FFmpeg, closing stdin...")
             
-            if process.returncode == 0:
-                self.progress_bar.setValue(100)
-                self.status_label.setText(f"✅ Video erstellt: {os.path.basename(output_path)}")
-                print(f"✅ Video export successful: {output_path}")
-            else:
-                self.status_label.setText(f"❌ FFmpeg Fehler: {stderr.decode()[:100]}")
-                print(f"❌ FFmpeg error: {stderr.decode()}")
+            print("🎬 All frames sent to FFmpeg, closing stdin...")
+            # Close stdin and wait for FFmpeg to finish
+            try:
+                print("🎬 Closing FFmpeg stdin...")
+                process.stdin.close()
+                print("🎬 Waiting for FFmpeg to finish...")
+                stdout, stderr = process.communicate(timeout=30)  # 30 second timeout
+                print(f"🎬 FFmpeg finished with return code: {process.returncode}")
+                
+                if process.returncode == 0:
+                    print("✅ FFmpeg success!")
+                    self.progress_bar.setValue(100)
+                    self.status_label.setText(f"✅ Video erstellt: {os.path.basename(output_path)}")
+                    print(f"✅ Video export successful: {output_path}")
+                else:
+                    error_msg = stderr.decode() if stderr else "Unknown FFmpeg error"
+                    print(f"❌ FFmpeg failed with error: {error_msg}")
+                    self.status_label.setText(f"❌ FFmpeg Fehler: {error_msg[:100]}")
+                    print(f"❌ FFmpeg error: {error_msg}")
+                    
+            except subprocess.TimeoutExpired:
+                print("❌ FFmpeg process timed out")
+                process.kill()
+                self.status_label.setText("❌ FFmpeg Timeout - Prozess abgebrochen")
+            except Exception as comm_error:
+                print(f"❌ Communication error with FFmpeg: {comm_error}")
+                self.status_label.setText(f"❌ FFmpeg Kommunikationsfehler: {str(comm_error)}")
                 
         except Exception as e:
+            print(f"❌ CRITICAL ERROR in continue_video_creation_in_memory: {e}")
             self.status_label.setText(f"❌ Export-Fehler: {str(e)}")
             print(f"❌ Export error: {e}")
+            import traceback
+            traceback.print_exc()  # Print full stacktrace for debugging
             
         finally:
+            print("🎬 Video export cleanup - enabling export button")
             self.export_btn.setEnabled(True)
     
     def on_interpolation_error(self, error_message):
@@ -1348,5 +1459,131 @@ class SimpleVideoExportDialog(QDialog):
         except Exception as e:
             self.status_label.setText(f"❌ OpenCV Export-Fehler: {str(e)}")
             print(f"❌ OpenCV export error: {e}")
+        finally:
+            self.export_btn.setEnabled(True)
+    
+    def continue_video_creation_with_temp_files(self, pixmaps_list):
+        """Create video using temporary files for large frames"""
+        import os
+        import tempfile
+        import subprocess
+        from PyQt6.QtCore import Qt
+        
+        # Retrieve stored parameters
+        params = self.pending_video_params
+        output_path = params['output_path']
+        fps = params['fps']
+        quality = params['quality']
+        upscale = params['upscale']
+        codec = params['codec']
+        
+        print("🎬 Using temporary files approach for large frames")
+        
+        # Try to find FFmpeg
+        ffmpeg_path = self.find_ffmpeg()
+        if not ffmpeg_path:
+            print("❌ FFmpeg not found!")
+            self.status_label.setText("❌ FFmpeg nicht gefunden!")
+            self.export_btn.setEnabled(True)
+            return
+        
+        try:
+            # Create temporary directory
+            temp_dir = tempfile.mkdtemp(prefix="video_export_")
+            print(f"🔄 Created temp directory: {temp_dir}")
+            
+            # Save all frames as temporary PNG files
+            temp_files = []
+            for i, pixmap in enumerate(pixmaps_list):
+                try:
+                    # Apply upscaling if needed
+                    scaled_pixmap = pixmap
+                    if upscale != "1x":
+                        upscale_factor = self.parse_upscale_factor(upscale)
+                        if upscale_factor != 1:
+                            new_width = int(pixmap.width() * upscale_factor)
+                            new_height = int(pixmap.height() * upscale_factor)
+                            scaled_pixmap = pixmap.scaled(new_width, new_height, 
+                                                        Qt.AspectRatioMode.IgnoreAspectRatio,
+                                                        Qt.TransformationMode.SmoothTransformation)
+                    
+                    # Save as temporary file
+                    temp_file = os.path.join(temp_dir, f"frame_{i+1:06d}.png")
+                    scaled_pixmap.save(temp_file, "PNG")
+                    temp_files.append(temp_file)
+                    
+                    # Update progress
+                    progress = int((i + 1) / len(pixmaps_list) * 50)  # First 50% for saving files
+                    self.progress_bar.setValue(progress)
+                    self.status_label.setText(f"💾 Speichere Frame {i+1}/{len(pixmaps_list)}")
+                    
+                    if i % 10 == 0:
+                        print(f"💾 Saved frame {i+1}/{len(pixmaps_list)} to temp file")
+                    
+                except Exception as e:
+                    print(f"❌ Error saving frame {i+1}: {e}")
+                    continue
+            
+            print(f"💾 Saved {len(temp_files)} temporary files")
+            
+            # Create FFmpeg command using temporary files
+            input_pattern = os.path.join(temp_dir, "frame_%06d.png")
+            output_path = self.get_unique_filename(output_path)
+            
+            cmd = [ffmpeg_path, "-y", "-framerate", str(fps), "-i", input_pattern, "-c:v", codec]
+            
+            # Add quality settings
+            if quality == "high":
+                cmd.extend(['-crf', '18'])
+            elif quality == "medium":
+                cmd.extend(['-crf', '23'])
+            else:
+                cmd.extend(['-crf', '28'])
+            
+            cmd.extend(["-pix_fmt", "yuv420p", output_path])
+            
+            print(f"🎬 FFmpeg command: {' '.join(cmd)}")
+            
+            # Run FFmpeg
+            self.status_label.setText("🎬 Erstelle Video...")
+            process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+            
+            # Simple progress simulation for video creation
+            for i in range(51, 101):
+                if process.poll() is not None:
+                    break
+                self.progress_bar.setValue(i)
+                self.status_label.setText(f"🎬 Erstelle Video... {i}%")
+                import time
+                time.sleep(0.1)
+            
+            stdout, stderr = process.communicate()
+            
+            if process.returncode == 0:
+                self.progress_bar.setValue(100)
+                self.status_label.setText(f"✅ Video erstellt: {os.path.basename(output_path)}")
+                print(f"✅ Video export successful: {output_path}")
+            else:
+                self.status_label.setText(f"❌ FFmpeg Fehler: {stderr[:100]}")
+                print(f"❌ FFmpeg error: {stderr}")
+            
+            # Cleanup temporary files
+            print(f"🧹 Cleaning up {len(temp_files)} temporary files...")
+            for temp_file in temp_files:
+                try:
+                    os.remove(temp_file)
+                except:
+                    pass
+            try:
+                os.rmdir(temp_dir)
+                print("🧹 Temporary directory cleaned up")
+            except:
+                print(f"⚠️ Could not remove temp directory: {temp_dir}")
+                
+        except Exception as e:
+            print(f"❌ Error in temp files approach: {e}")
+            self.status_label.setText(f"❌ Export-Fehler: {str(e)}")
+            import traceback
+            traceback.print_exc()
         finally:
             self.export_btn.setEnabled(True)
