@@ -7,14 +7,18 @@ import sys
 import os
 import time
 import glob
+import subprocess
+import tempfile
+import shutil
 from typing import List, Optional
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QPushButton, QSlider, QSpinBox, QCheckBox,
-    QMessageBox
+    QMessageBox, QProgressBar, QLineEdit, QFileDialog, QGroupBox, QDialog
 )
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QFileSystemWatcher
 from PyQt6.QtGui import QPixmap, QFont, QPainter
+from export_dialog import SimpleVideoExportDialog
 
 
 class ImagePlayer(QThread):
@@ -244,6 +248,603 @@ class ImagePlayer(QThread):
                 self.msleep(100)
 
 
+class VideoExporter(QThread):
+    """Background thread for video generation from frames"""
+    
+    progressChanged = pyqtSignal(int, str)
+    finished = pyqtSignal(str)
+    error = pyqtSignal(str)
+    
+    def __init__(self):
+        super().__init__()
+        self.image_files = []
+        self.output_path = ""
+        self.fps = 25
+        self.blend_frames = 1
+        self.blend_alpha = 0.3
+        self.interpolate_frames = False
+        self.interpolation_steps = 5
+        self.video_quality = "high"
+        self.upscale_factor = 1
+        self.video_codec = "libx264"
+        self.video_bitrate = "auto"
+        
+    def set_export_settings(self, image_files, output_path, fps, 
+                          blend_frames=1, blend_alpha=0.3, 
+                          interpolate_frames=False, interpolation_steps=5,
+                          video_quality="high", upscale_factor=1,
+                          video_codec="libx264", video_bitrate="auto"):
+        """Set export settings"""
+        self.image_files = image_files
+        self.output_path = output_path
+        self.fps = fps
+        self.blend_frames = blend_frames
+        self.blend_alpha = blend_alpha
+        self.interpolate_frames = interpolate_frames
+        self.interpolation_steps = interpolation_steps
+        self.video_quality = video_quality
+        self.upscale_factor = upscale_factor
+        self.video_codec = video_codec
+        self.video_bitrate = video_bitrate
+        
+    def run(self):
+        """Generate video from frames"""
+        try:
+            self.progressChanged.emit(0, "Vorbereitung...")
+            
+            # Generate frame sequence with current viewer settings
+            temp_dir = tempfile.mkdtemp(prefix="video_export_")
+            frame_files = []
+            
+            total_frames = len(self.image_files)
+            if self.interpolate_frames:
+                total_frames *= self.interpolation_steps
+                
+            current_frame = 0
+            
+            for i, image_path in enumerate(self.image_files):
+                if self.interpolate_frames:
+                    # Generate interpolated frames
+                    for step in range(self.interpolation_steps):
+                        frame_file = os.path.join(temp_dir, f"frame_{current_frame:06d}.png")
+                        
+                        if step == 0:
+                            # First step: use original frame
+                            self._copy_frame(image_path, frame_file)
+                        else:
+                            # Generate interpolated frame
+                            self._generate_interpolated_frame(
+                                image_path, 
+                                self.image_files[(i + 1) % len(self.image_files)],
+                                step / self.interpolation_steps,
+                                frame_file
+                            )
+                        
+                        frame_files.append(frame_file)
+                        current_frame += 1
+                        
+                        progress = int((current_frame / total_frames) * 50)
+                        self.progressChanged.emit(progress, f"Frame {current_frame}/{total_frames}")
+                        
+                elif self.blend_frames > 1:
+                    # Generate blended frame
+                    frame_file = os.path.join(temp_dir, f"frame_{current_frame:06d}.png")
+                    self._generate_blended_frame(i, frame_file)
+                    frame_files.append(frame_file)
+                    current_frame += 1
+                    
+                    progress = int((current_frame / total_frames) * 50)
+                    self.progressChanged.emit(progress, f"Frame {current_frame}/{total_frames}")
+                else:
+                    # Use original frame
+                    frame_file = os.path.join(temp_dir, f"frame_{current_frame:06d}.png")
+                    self._copy_frame(image_path, frame_file)
+                    frame_files.append(frame_file)
+                    current_frame += 1
+                    
+                    progress = int((current_frame / total_frames) * 50)
+                    self.progressChanged.emit(progress, f"Frame {current_frame}/{total_frames}")
+            
+            # Generate video with FFmpeg
+            self.progressChanged.emit(50, "Video-Encoding...")
+            
+            # Build FFmpeg command
+            ffmpeg_cmd = self._build_ffmpeg_command(temp_dir, self.output_path)
+            
+            # Run FFmpeg
+            process = subprocess.Popen(
+                ffmpeg_cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            
+            # Monitor progress
+            while process.poll() is None:
+                self.msleep(100)
+                
+            if process.returncode == 0:
+                # Cleanup temp files
+                shutil.rmtree(temp_dir)
+                
+                self.progressChanged.emit(100, "Video erfolgreich erstellt!")
+                self.finished.emit(self.output_path)
+            else:
+                error_output = process.stderr.read()
+                self.error.emit(f"FFmpeg Fehler: {error_output}")
+                
+        except Exception as e:
+            self.error.emit(f"Export-Fehler: {str(e)}")
+    
+    def _copy_frame(self, src_path, dst_path):
+        """Copy frame with optional upscaling"""
+        if self.upscale_factor > 1:
+            # Upscale frame
+            pixmap = QPixmap(src_path)
+            scaled = pixmap.scaled(
+                pixmap.width() * self.upscale_factor,
+                pixmap.height() * self.upscale_factor,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation
+            )
+            scaled.save(dst_path)
+        else:
+            shutil.copy2(src_path, dst_path)
+    
+    def _generate_interpolated_frame(self, frame1_path, frame2_path, alpha, output_path):
+        """Generate interpolated frame between two frames"""
+        pixmap1 = QPixmap(frame1_path)
+        pixmap2 = QPixmap(frame2_path)
+        
+        if self.upscale_factor > 1:
+            size = pixmap1.size() * self.upscale_factor
+        else:
+            size = pixmap1.size()
+            
+        result = QPixmap(size)
+        result.fill()
+        
+        painter = QPainter(result)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        
+        # Draw base frame
+        painter.setOpacity(1.0)
+        painter.drawPixmap(0, 0, pixmap1.scaled(size))
+        
+        # Draw interpolated frame
+        painter.setOpacity(alpha)
+        painter.drawPixmap(0, 0, pixmap2.scaled(size))
+        
+        painter.end()
+        result.save(output_path)
+    
+    def _generate_blended_frame(self, frame_index, output_path):
+        """Generate blended frame using multiple source frames"""
+        # Get frames to blend
+        frames_to_blend = []
+        for i in range(self.blend_frames):
+            idx = (frame_index - i) % len(self.image_files)
+            frames_to_blend.append(self.image_files[idx])
+        
+        # Load base frame
+        base_pixmap = QPixmap(frames_to_blend[0])
+        
+        if self.upscale_factor > 1:
+            size = base_pixmap.size() * self.upscale_factor
+        else:
+            size = base_pixmap.size()
+            
+        result = QPixmap(size)
+        result.fill()
+        
+        painter = QPainter(result)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        
+        # Draw base frame
+        painter.setOpacity(1.0)
+        painter.drawPixmap(0, 0, base_pixmap.scaled(size))
+        
+        # Blend additional frames
+        for i, frame_path in enumerate(frames_to_blend[1:], 1):
+            frame_pixmap = QPixmap(frame_path)
+            alpha = self.blend_alpha * (1.0 - (i / self.blend_frames))
+            painter.setOpacity(alpha)
+            painter.drawPixmap(0, 0, frame_pixmap.scaled(size))
+        
+        painter.end()
+        result.save(output_path)
+    
+    def _build_ffmpeg_command(self, temp_dir, output_path):
+        """Build FFmpeg command based on quality settings"""
+        base_cmd = [
+            "ffmpeg", "-y",
+            "-framerate", str(self.fps),
+            "-i", os.path.join(temp_dir, "frame_%06d.png"),
+            "-c:v", self.video_codec,
+            "-pix_fmt", "yuv420p"
+        ]
+        
+        # Add bitrate or CRF based on quality
+        if self.video_bitrate != "auto":
+            base_cmd.extend(["-b:v", self.video_bitrate])
+        else:
+            if self.video_quality == "youtube":
+                # YouTube optimized
+                base_cmd.extend([
+                    "-crf", "18",
+                    "-preset", "slower",
+                    "-movflags", "+faststart"
+                ])
+            elif self.video_quality == "high":
+                # High quality
+                base_cmd.extend([
+                    "-crf", "15",
+                    "-preset", "slow"
+                ])
+            elif self.video_quality == "medium":
+                # Medium quality
+                base_cmd.extend([
+                    "-crf", "23",
+                    "-preset", "medium"
+                ])
+            else:  # fast
+                # Fast encoding
+                base_cmd.extend([
+                    "-crf", "28",
+                    "-preset", "fast"
+                ])
+        
+        base_cmd.append(output_path)
+        return base_cmd
+
+
+class VideoExportDialog(QDialog):
+    """Dialog for video export settings"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parent_viewer = parent
+        self.video_exporter = VideoExporter()
+        self.video_exporter.progressChanged.connect(self.update_progress)
+        self.video_exporter.finished.connect(self.export_finished)
+        self.video_exporter.error.connect(self.export_error)
+        
+        self.setModal(True)  # Modaler Dialog
+        self.init_ui()
+        
+    def init_ui(self):
+        """Initialize export dialog UI"""
+        self.setWindowTitle("🎬 Video Export")
+        self.setFixedSize(420, 380)
+        
+        # Center on parent
+        if self.parent():
+            parent_geo = self.parent().geometry()
+            self.move(parent_geo.x() + 50, parent_geo.y() + 50)
+        
+        # Simplified dark theme
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #2b2b2b;
+                color: #ffffff;
+                font-family: Arial, sans-serif;
+                font-size: 12px;
+            }
+            QLabel {
+                color: #ffffff;
+                margin: 2px;
+            }
+            QPushButton {
+                background-color: #404040;
+                border: 1px solid #666;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #505050;
+            }
+            QSpinBox, QComboBox, QLineEdit {
+                background-color: #404040;
+                border: 1px solid #666;
+                border-radius: 3px;
+                padding: 4px;
+                min-height: 20px;
+            }
+            QProgressBar {
+                border: 1px solid #666;
+                border-radius: 3px;
+                background-color: #404040;
+                text-align: center;
+            }
+            QProgressBar::chunk {
+                background-color: #4CAF50;
+                border-radius: 2px;
+            }
+            QCheckBox {
+                color: #ffffff;
+                margin: 4px;
+            }
+        """)
+        
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title
+        title = QLabel("� Video Export Einstellungen")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; margin-bottom: 10px;")
+        layout.addWidget(title)
+        
+        # Basic settings
+        settings_layout = QVBoxLayout()
+        settings_layout.setSpacing(10)
+        
+        # FPS
+        fps_row = QHBoxLayout()
+        fps_row.addWidget(QLabel("FPS:"))
+        self.fps_spin = QSpinBox()
+        self.fps_spin.setRange(1, 120)
+        self.fps_spin.setValue(25)
+        self.fps_spin.setFixedWidth(80)
+        fps_row.addWidget(self.fps_spin)
+        fps_row.addStretch()
+        settings_layout.addLayout(fps_row)
+        
+        # Quality
+        quality_row = QHBoxLayout()
+        quality_row.addWidget(QLabel("Qualität:"))
+        self.quality_combo = QComboBox()
+        self.quality_combo.addItems(["youtube", "high", "medium", "fast"])
+        self.quality_combo.setCurrentText("youtube")
+        self.quality_combo.setFixedWidth(100)
+        quality_row.addWidget(self.quality_combo)
+        quality_row.addStretch()
+        settings_layout.addLayout(quality_row)
+        
+        # Upscaling
+        upscale_row = QHBoxLayout()
+        upscale_row.addWidget(QLabel("Upscaling:"))
+        self.upscale_combo = QComboBox()
+        self.upscale_combo.addItems(["1x", "2x", "4x"])
+        self.upscale_combo.setCurrentIndex(1)
+        self.upscale_combo.setFixedWidth(80)
+        upscale_row.addWidget(self.upscale_combo)
+        upscale_row.addStretch()
+        settings_layout.addLayout(upscale_row)
+        
+        # Codec
+        codec_row = QHBoxLayout()
+        codec_row.addWidget(QLabel("Codec:"))
+        self.codec_combo = QComboBox()
+        self.codec_combo.addItems(["libx264", "libx265", "libvpx-vp9"])
+        self.codec_combo.setFixedWidth(100)
+        codec_row.addWidget(self.codec_combo)
+        codec_row.addStretch()
+        settings_layout.addLayout(codec_row)
+        
+        # Bitrate
+        bitrate_row = QHBoxLayout()
+        bitrate_row.addWidget(QLabel("Bitrate:"))
+        self.bitrate_combo = QComboBox()
+        self.bitrate_combo.addItems(["auto", "2M", "5M", "10M", "20M"])
+        self.bitrate_combo.setFixedWidth(80)
+        bitrate_row.addWidget(self.bitrate_combo)
+        bitrate_row.addStretch()
+        settings_layout.addLayout(bitrate_row)
+        
+        layout.addLayout(settings_layout)
+        
+        # Viewer settings
+        self.copy_settings_check = QCheckBox("Viewer-Einstellungen übernehmen")
+        self.copy_settings_check.setChecked(True)
+        layout.addWidget(self.copy_settings_check)
+        
+        self.settings_preview = QLabel()
+        self.settings_preview.setStyleSheet("color: #90EE90; font-size: 11px;")
+        self.settings_preview.setWordWrap(True)
+        layout.addWidget(self.settings_preview)
+        
+        # Output file
+        output_layout = QHBoxLayout()
+        output_layout.addWidget(QLabel("Ausgabe:"))
+        self.path_edit = QLineEdit()
+        self.path_edit.setText("video_export.mp4")
+        output_layout.addWidget(self.path_edit)
+        
+        browse_btn = QPushButton("...")
+        browse_btn.setFixedWidth(30)
+        browse_btn.clicked.connect(self.browse_output_path)
+        output_layout.addWidget(browse_btn)
+        layout.addLayout(output_layout)
+        
+        # Progress
+        self.progress_bar = QProgressBar()
+        layout.addWidget(self.progress_bar)
+        
+        self.status_label = QLabel("Bereit für Export")
+        self.status_label.setStyleSheet("color: #90EE90;")
+        layout.addWidget(self.status_label)
+        
+        # Buttons
+        button_layout = QHBoxLayout()
+        
+        self.export_btn = QPushButton("🎬 Video Exportieren")
+        self.export_btn.clicked.connect(self.start_export)
+        self.export_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                border: 1px solid #45a049;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 10px 20px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        button_layout.addWidget(self.export_btn)
+        
+        close_btn = QPushButton("Schließen")
+        close_btn.clicked.connect(self.close)
+        close_btn.setFixedWidth(80)
+        button_layout.addWidget(close_btn)
+        
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+        
+        # Update preview
+        self.copy_settings_check.toggled.connect(self.update_settings_preview)
+        self.update_settings_preview()
+    
+    def update_settings_preview(self):
+        """Update preview of current viewer settings"""
+        if not self.copy_settings_check.isChecked():
+            self.settings_preview.setText("Standard-Einstellungen werden verwendet")
+            return
+            
+        preview = "Aktuelle Viewer-Einstellungen:\n"
+        
+        if self.parent_viewer.blend_check.isChecked():
+            frames = self.parent_viewer.blend_frames_spin.value()
+            alpha = self.parent_viewer.blend_alpha_slider.value()
+            preview += f"• Normale Überblendung: {frames} Frames, {alpha}%\n"
+        
+        if self.parent_viewer.interpolate_check.isChecked():
+            steps = self.parent_viewer.interpolation_steps_spin.value()
+            preview += f"• Zwischenframes: {steps} Schritte\n"
+        
+        if not self.parent_viewer.blend_check.isChecked() and not self.parent_viewer.interpolate_check.isChecked():
+            preview += "• Keine Effekte (Original-Frames)"
+        
+        self.settings_preview.setText(preview.strip())
+    
+    def browse_output_path(self):
+        """Browse for output path"""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Video speichern als",
+            self.path_edit.text(),
+            "MP4 Videos (*.mp4);;AVI Videos (*.avi);;MOV Videos (*.mov);;MKV Videos (*.mkv)"
+        )
+        
+        if file_path:
+            self.path_edit.setText(file_path)
+    
+    def start_export(self):
+        """Start video export"""
+        if not self.parent_viewer.player.image_files:
+            QMessageBox.warning(self, "Fehler", "Keine Bilder geladen!")
+            return
+            
+        output_path = self.path_edit.text()
+        if not output_path:
+            QMessageBox.warning(self, "Fehler", "Bitte Ausgabepfad wählen!")
+            return
+        
+        # Get settings
+        fps = self.fps_spin.value()
+        quality = self.quality_combo.currentText()
+        upscale_text = self.upscale_combo.currentText()
+        upscale_factor = int(upscale_text.split('x')[0])
+        
+        # Get codec
+        codec_text = self.codec_combo.currentText()
+        codec = codec_text.split()[0]  # Extract codec name
+        
+        # Get bitrate
+        bitrate = self.bitrate_combo.currentText()
+        
+        # Get viewer settings if enabled
+        blend_frames = 1
+        blend_alpha = 0.3
+        interpolate_frames = False
+        interpolation_steps = 5
+        
+        if self.copy_settings_check.isChecked():
+            if self.parent_viewer.blend_check.isChecked():
+                blend_frames = self.parent_viewer.blend_frames_spin.value()
+                blend_alpha = self.parent_viewer.blend_alpha_slider.value() / 100.0
+            
+            if self.parent_viewer.interpolate_check.isChecked():
+                interpolate_frames = True
+                interpolation_steps = self.parent_viewer.interpolation_steps_spin.value()
+        
+        # Show confirmation with estimated info
+        estimated_frames = len(self.parent_viewer.player.image_files)
+        if interpolate_frames:
+            estimated_frames *= interpolation_steps
+            
+        reply = QMessageBox.question(
+            self,
+            "Export bestätigen",
+            f"Video-Export starten?\n\n"
+            f"📁 Ausgabe: {os.path.basename(output_path)}\n"
+            f"🎬 Geschätzte Frames: {estimated_frames}\n"
+            f"⏱️ FPS: {fps}\n"
+            f"📊 Qualität: {quality}\n"
+            f"🔍 Upscaling: {upscale_factor}x\n"
+            f"🎨 Effekte: {'Ja' if (blend_frames > 1 or interpolate_frames) else 'Nein'}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        # Setup exporter
+        self.video_exporter.set_export_settings(
+            self.parent_viewer.player.image_files,
+            output_path,
+            fps,
+            blend_frames,
+            blend_alpha,
+            interpolate_frames,
+            interpolation_steps,
+            quality,
+            upscale_factor,
+            codec,
+            bitrate
+        )
+        
+        # Start export
+        self.export_btn.setEnabled(False)
+        self.progress_bar.setValue(0)
+        self.status_label.setText("Export gestartet...")
+        
+        self.video_exporter.start()
+    
+    def update_progress(self, progress, message):
+        """Update export progress"""
+        self.progress_bar.setValue(progress)
+        self.status_label.setText(message)
+    
+    def export_finished(self, output_path):
+        """Handle export completion"""
+        self.export_btn.setEnabled(True)
+        self.status_label.setText(f"Export abgeschlossen: {os.path.basename(output_path)}")
+        
+        # Show success message
+        reply = QMessageBox.question(
+            self,
+            "Export abgeschlossen! 🎉",
+            f"Video erfolgreich erstellt:\n{output_path}\n\nVideo öffnen?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                os.startfile(output_path)  # Windows
+            except:
+                # Fallback for other systems
+                subprocess.run(['xdg-open', output_path])
+    
+    def export_error(self, error_message):
+        """Handle export error"""
+        self.export_btn.setEnabled(True)
+        self.status_label.setText("Export fehlgeschlagen!")
+        QMessageBox.critical(self, "Export-Fehler", f"Fehler beim Video-Export:\n\n{error_message}")
+
+
 class PreviewViewer(QMainWindow):
     """Main preview viewer application"""
     
@@ -381,6 +982,23 @@ class PreviewViewer(QMainWindow):
         self.fps_spin.setValue(50)  # Default auf 50 FPS
         self.fps_spin.valueChanged.connect(self.on_fps_changed)
         controls_layout.addWidget(self.fps_spin)
+        
+        # Video Export button
+        self.export_btn = QPushButton("🎬 Video Export")
+        self.export_btn.clicked.connect(self.open_video_export)
+        self.export_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF6B35;
+                border: 2px solid #E55A2B;
+                font-weight: bold;
+                padding: 8px 16px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #E55A2B;
+            }
+        """)
+        controls_layout.addWidget(self.export_btn)
         
         # Auto-refresh checkbox
         self.auto_refresh_check = QCheckBox("Auto-Refresh")
@@ -749,6 +1367,15 @@ class PreviewViewer(QMainWindow):
         # Refresh if interpolation is active
         if self.interpolate_check.isChecked() and self.blend_check.isChecked() and self.player.image_files:
             self.player.emit_blended_frame()
+    
+    def open_video_export(self):
+        """Open video export dialog"""
+        if not self.player.image_files:
+            QMessageBox.warning(self, "Fehler", "Keine Bilder geladen!\n\nBitte wählen Sie zuerst einen Ordner mit generierten Frames aus.")
+            return
+            
+        dialog = SimpleVideoExportDialog(self)
+        dialog.exec()
         
     def on_frame_slider_changed(self, value: int):
         """Handle frame slider change"""

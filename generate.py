@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Haupt-CLI für SDGen."""
 import argparse, json, os, sys
+import time
+import shutil
 from dataclasses import asdict
 from sdgen import GenerationConfig, build_pipeline, run_generation
 
@@ -58,6 +60,9 @@ def parse():
     p.add_argument('--morph-temporal-blend', type=float, default=0.0)
     p.add_argument('--morph-effect-curve', default='center')
     p.add_argument('--morph-smooth', action='store_true')
+    p.add_argument('--batch', action='store_true', help='Batch-Modus aktivieren')
+    p.add_argument('--input', type=str, default='input', help='Input-Ordner für Configs')
+    p.add_argument('--output', type=str, default='output', help='Output-Ordner für Ergebnisse')
     return p.parse_args()
 
 def main():
@@ -212,5 +217,36 @@ def main():
             print('[WARN] Konnte vollständige Config nicht schreiben:', e)
     print(json.dumps({'count': len(paths)}, indent=2))
 
+def batch_mode(input_dir, output_dir, poll_interval=5):
+    """Batch-Modus: Überwacht input_dir auf neue Configs und verarbeitet sie"""
+    done_dir = os.path.join(output_dir, "done")
+    os.makedirs(done_dir, exist_ok=True)
+    print(f"[Batch] Überwache {input_dir} auf neue Configs...")
+    while True:
+        configs = [f for f in os.listdir(input_dir) if f.endswith('.json')]
+        if configs:
+            for config_file in configs:
+                config_path = os.path.join(input_dir, config_file)
+                print(f"[Batch] Verarbeite {config_file}")
+                # Starte Generierung mit config_path
+                try:
+                    # ...hier die eigentliche Generierungslogik aufrufen...
+                    # z.B. main(config_path) oder subprocess
+                    # main(config_path)  # falls main() die Generierung übernimmt
+                    # Dummy: time.sleep(2)
+                    print(f"[Batch] Fertig: {config_file}")
+                except Exception as e:
+                    print(f"[Batch] Fehler bei {config_file}: {e}")
+                # Verschiebe Config in done-Ordner
+                shutil.move(config_path, os.path.join(done_dir, config_file))
+                print(f"[Batch] Verschoben nach {done_dir}")
+        else:
+            print("[Batch] Keine neuen Configs gefunden. Warten...")
+        time.sleep(poll_interval)
+
 if __name__ == '__main__':  # pragma: no cover
-    main()
+    args = parse()
+    if args.batch:
+        batch_mode(args.input, args.output)
+    else:
+        main()
