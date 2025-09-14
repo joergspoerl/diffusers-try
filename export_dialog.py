@@ -1,5 +1,5 @@
 """
-Simple Video Export Dialog with Qt-accelerated interpolation
+Simple Video Export Dialog with Qt-accelerated interpolation and async processing
 """
 
 import os
@@ -7,10 +7,192 @@ import numpy as np
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, 
     QPushButton, QSpinBox, QCheckBox, QLineEdit, QFileDialog,
-    QProgressBar
+    QProgressBar, QApplication
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QPixmap, QPainter, QImage
+
+
+class InterpolationWorker(QThread):
+    """Asynchroner Worker für Zwischenframe-Berechnung im Speicher"""
+    progress = pyqtSignal(int)
+    status = pyqtSignal(str)
+    finished = pyqtSignal(list)  # list of QPixmaps
+    error = pyqtSignal(str)
+    
+    def __init__(self, image_files, folder_path, interp_steps, blend_intensity):
+        super().__init__()
+        self.image_files = image_files
+        self.folder_path = folder_path
+        self.interp_steps = interp_steps
+        self.blend_intensity = blend_intensity
+        
+    def run(self):
+        """Führe Interpolation in separatem Thread aus - komplett im Speicher"""
+        try:
+            result = self.generate_interpolated_frames_in_memory()
+            self.finished.emit(result)
+        except Exception as e:
+            self.error.emit(f"Interpolation failed: {str(e)}")
+    
+    def generate_interpolated_frames_in_memory(self):
+        """Qt-basierte Interpolation komplett im Speicher - keine Dateien"""
+        from PyQt6.QtGui import QPixmap, QPainter
+        from PyQt6.QtCore import Qt
+        
+        all_pixmaps = []
+        total_work = len(self.image_files) + (len(self.image_files) - 1) * self.interp_steps
+        current_work = 0
+        
+        for i in range(len(self.image_files)):
+            # Add original frame
+            original_pixmap = QPixmap(self.image_files[i])
+            if not original_pixmap.isNull():
+                all_pixmaps.append(original_pixmap)
+            
+            current_work += 1
+            progress = int((current_work / total_work) * 100)
+            self.progress.emit(progress)
+            self.status.emit(f"🚀 Frame {i+1}/{len(self.image_files)}")
+            
+            # Generate interpolated frames (except for last image)
+            if i < len(self.image_files) - 1:
+                current_pixmap = QPixmap(self.image_files[i])
+                next_pixmap = QPixmap(self.image_files[i + 1])
+                
+                if current_pixmap.isNull() or next_pixmap.isNull():
+                    continue
+                
+                # Ensure consistent size
+                if current_pixmap.size() != next_pixmap.size():
+                    next_pixmap = next_pixmap.scaled(current_pixmap.size(), 
+                                                   Qt.AspectRatioMode.IgnoreAspectRatio,
+                                                   Qt.TransformationMode.SmoothTransformation)
+                
+                # Generate interpolation steps using Qt
+                for step in range(1, self.interp_steps + 1):
+                    # Calculate blend ratio
+                    ratio = step / (self.interp_steps + 1)
+                    effective_ratio = ratio * self.blend_intensity
+                    
+                    # Create interpolated frame using Qt
+                    result = QPixmap(current_pixmap.size())
+                    result.fill(Qt.GlobalColor.transparent)
+                    
+                    painter = QPainter(result)
+                    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                    
+                    # Draw frames with blending
+                    painter.setOpacity(1.0 - effective_ratio)
+                    painter.drawPixmap(0, 0, current_pixmap)
+                    
+                    painter.setOpacity(effective_ratio)
+                    painter.drawPixmap(0, 0, next_pixmap)
+                    
+                    painter.end()
+                    
+                    # Keep interpolated frame in memory
+                    all_pixmaps.append(result)
+                    
+                    current_work += 1
+                    progress = int((current_work / total_work) * 100)
+                    self.progress.emit(progress)
+                    
+                    # Allow GUI updates
+                    self.msleep(1)  # Small delay to prevent UI freezing
+        
+        self.status.emit(f"✅ {len(all_pixmaps)} Frames im Speicher erstellt")
+        return all_pixmaps
+    
+    def generate_interpolated_frames_qt(self):
+        """Qt-basierte Interpolation mit echten Progress-Updates"""
+        import os
+        
+        # Create temp folder for interpolated frames
+        interp_folder = os.path.join(self.folder_path, "interpolated_export")
+        os.makedirs(interp_folder, exist_ok=True)
+        
+        all_frames = []
+        frame_counter = 1
+        total_work = len(self.image_files) + (len(self.image_files) - 1) * self.interp_steps
+        current_work = 0
+        
+        for i in range(len(self.image_files)):
+            # Add original frame
+            original_path = self.image_files[i]
+            frame_path = os.path.join(interp_folder, f"frame_{frame_counter:06d}.png")
+            
+            # Load and save original frame
+            original_pixmap = QPixmap(original_path)
+            if not original_pixmap.isNull():
+                original_pixmap.save(frame_path, "PNG")
+                all_frames.append(frame_path)
+                frame_counter += 1
+            
+            current_work += 1
+            progress = int((current_work / total_work) * 100)
+            self.progress.emit(progress)
+            self.status.emit(f"🚀 Frame {i+1}/{len(self.image_files)}")
+            
+            # Generate interpolated frames (except for last image)
+            if i < len(self.image_files) - 1:
+                current_pixmap = QPixmap(self.image_files[i])
+                next_pixmap = QPixmap(self.image_files[i + 1])
+                
+                if current_pixmap.isNull() or next_pixmap.isNull():
+                    continue
+                
+                # Ensure consistent size
+                if current_pixmap.size() != next_pixmap.size():
+                    next_pixmap = next_pixmap.scaled(current_pixmap.size(), 
+                                                   Qt.AspectRatioMode.IgnoreAspectRatio,
+                                                   Qt.TransformationMode.SmoothTransformation)
+                
+                # Generate interpolation steps using Qt
+                for step in range(1, self.interp_steps + 1):
+                    # Calculate blend ratio
+                    ratio = step / (self.interp_steps + 1)
+                    effective_ratio = ratio * self.blend_intensity
+                    
+                    # Create interpolated frame using Qt
+                    result = QPixmap(current_pixmap.size())
+                    result.fill(Qt.GlobalColor.transparent)
+                    
+                    painter = QPainter(result)
+                    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+                    
+                    # Draw frames with blending
+                    painter.setOpacity(1.0 - effective_ratio)
+                    painter.drawPixmap(0, 0, current_pixmap)
+                    
+                    painter.setOpacity(effective_ratio)
+                    painter.drawPixmap(0, 0, next_pixmap)
+                    
+                    painter.end()
+                    
+                    # Save interpolated frame
+                    interp_path = os.path.join(interp_folder, f"frame_{frame_counter:06d}.png")
+                    result.save(interp_path, "PNG")
+                    all_frames.append(interp_path)
+                    frame_counter += 1
+                    
+                    current_work += 1
+                    progress = int((current_work / total_work) * 100)
+                    self.progress.emit(progress)
+                    
+                    # Allow GUI updates
+                    self.msleep(1)  # Small delay to prevent UI freezing
+        
+        return all_frames
+    
+    def generate_interpolated_frames_pil(self):
+        """PIL-basierte Interpolation als Fallback"""
+        from PIL import Image
+        import os
+        
+        # Similar implementation but with PIL
+        # ... (implementation similar to Qt version but with PIL)
+        pass
 
 
 class SimpleVideoExportDialog(QDialog):
@@ -614,13 +796,47 @@ class SimpleVideoExportDialog(QDialog):
         self.status_label.setText(f"📸 {len(image_files)} Bilder gefunden")
         print(f"📸 Found {len(image_files)} images")
         
+        # Store parameters for later use
+        self.pending_video_params = {
+            'folder_path': folder_path,
+            'output_path': output_path,
+            'fps': fps,
+            'quality': quality,
+            'upscale': upscale,
+            'codec': codec,
+            'image_files': image_files
+        }
+        
         # Generate interpolated frames if requested
         if use_interpolation and len(image_files) > 1:
             self.status_label.setText("🔄 Generiere Zwischenframes...")
-            image_files = self.generate_interpolated_frames(
-                image_files, folder_path, interp_steps, blend_intensity
-            )
-            print(f"🔄 Generated {len(image_files)} total frames with interpolation")
+            self.start_interpolation(image_files, folder_path, interp_steps, blend_intensity)
+            return  # Processing continues in on_interpolation_finished
+        else:
+            # No interpolation needed, use in-memory processing with original files
+            from PyQt6.QtGui import QPixmap
+            pixmaps_list = []
+            for img_path in image_files:
+                pixmap = QPixmap(img_path)
+                if not pixmap.isNull():
+                    pixmaps_list.append(pixmap)
+            self.continue_video_creation_in_memory(pixmaps_list)
+    
+    def continue_video_creation(self, image_files):
+        """Continue with video creation after interpolation (or without)"""
+        import os
+        import subprocess
+        
+        # Retrieve stored parameters
+        params = self.pending_video_params
+        folder_path = params['folder_path']
+        output_path = params['output_path']
+        fps = params['fps']
+        quality = params['quality']
+        upscale = params['upscale']
+        codec = params['codec']
+        
+        print(f"🔄 Continuing with {len(image_files)} total frames for video creation")
         
         # Try to find FFmpeg
         ffmpeg_path = self.find_ffmpeg()
@@ -630,37 +846,43 @@ class SimpleVideoExportDialog(QDialog):
             return
         
         # Prepare FFmpeg command
-        input_pattern = os.path.join(folder_path, "frame_%06d.png")
+        # Check if we have interpolated frames in subdirectory
+        interp_folder = os.path.join(folder_path, "interpolated_export")
         
-        # Check if files follow frame_XXXXXX.png pattern
-        frame_pattern_file = None
-        for i in range(1, min(10, len(image_files) + 1)):
-            test_file = os.path.join(folder_path, f"frame_{i:06d}.png")
-            if os.path.exists(test_file):
-                frame_pattern_file = test_file
-                break
-        
-        if frame_pattern_file:
-            # Files already follow the correct pattern
-            input_pattern = os.path.join(folder_path, "frame_%06d.png")
-            print(f"✅ Using existing frame pattern: {input_pattern}")
+        if os.path.exists(interp_folder) and len(os.listdir(interp_folder)) > 0:
+            # Use interpolated frames directory
+            input_pattern = os.path.join(interp_folder, "frame_%06d.png")
+            print(f"✅ Using interpolated frames: {input_pattern}")
         else:
-            # Files have different naming, create symlinks or copy
-            self.status_label.setText("🔄 Bereite Dateien vor...")
-            temp_folder = os.path.join(folder_path, "temp_export")
-            os.makedirs(temp_folder, exist_ok=True)
+            # Check if files in main folder follow frame_XXXXXX.png pattern
+            frame_pattern_file = None
+            for i in range(1, min(10, len(image_files) + 1)):
+                test_file = os.path.join(folder_path, f"frame_{i:06d}.png")
+                if os.path.exists(test_file):
+                    frame_pattern_file = test_file
+                    break
             
-            for i, img_file in enumerate(image_files):
-                src = img_file
-                dst = os.path.join(temp_folder, f"frame_{i+1:06d}.png")
-                if os.path.exists(dst):
-                    os.remove(dst)
-                # Copy file
-                import shutil
-                shutil.copy2(src, dst)
+            if frame_pattern_file:
+                # Files already follow the correct pattern
+                input_pattern = os.path.join(folder_path, "frame_%06d.png")
+                print(f"✅ Using existing frame pattern: {input_pattern}")
+            else:
+                # Files have different naming, create symlinks or copy
+                self.status_label.setText("🔄 Bereite Dateien vor...")
+                temp_folder = os.path.join(folder_path, "temp_export")
+                os.makedirs(temp_folder, exist_ok=True)
                 
-            input_pattern = os.path.join(temp_folder, "frame_%06d.png")
-            print(f"📁 Created temp files: {input_pattern}")
+                for i, img_file in enumerate(image_files):
+                    src = img_file
+                    dst = os.path.join(temp_folder, f"frame_{i+1:06d}.png")
+                    if os.path.exists(dst):
+                        os.remove(dst)
+                    # Copy file
+                    import shutil
+                    shutil.copy2(src, dst)
+                    
+                input_pattern = os.path.join(temp_folder, "frame_%06d.png")
+                print(f"📁 Created temp files: {input_pattern}")
         
         # Build FFmpeg command
         cmd = [ffmpeg_path, "-y"]  # -y to overwrite output
@@ -743,6 +965,132 @@ class SimpleVideoExportDialog(QDialog):
             
         finally:
             self.export_btn.setEnabled(True)
+    
+    def on_interpolation_finished(self, pixmaps_list):
+        """Called when interpolation worker finishes successfully"""
+        print(f"✅ Interpolation completed with {len(pixmaps_list)} frames in memory")
+        self.status_label.setText(f"✅ Interpolation abgeschlossen: {len(pixmaps_list)} Frames")
+        
+        # Continue with in-memory video creation
+        self.continue_video_creation_in_memory(pixmaps_list)
+    
+    def continue_video_creation_in_memory(self, pixmaps_list):
+        """Continue with video creation using in-memory pixmaps"""
+        import subprocess
+        import numpy as np
+        from PyQt6.QtGui import QImage
+        from PyQt6.QtCore import Qt
+        
+        # Retrieve stored parameters
+        params = self.pending_video_params
+        folder_path = params['folder_path']
+        output_path = params['output_path']
+        fps = params['fps']
+        quality = params['quality']
+        upscale = params['upscale']
+        codec = params['codec']
+        
+        print(f"🔄 Creating video from {len(pixmaps_list)} in-memory frames")
+        
+        # Try to find FFmpeg
+        ffmpeg_path = self.find_ffmpeg()
+        if not ffmpeg_path:
+            self.status_label.setText("❌ FFmpeg nicht gefunden!")
+            self.export_btn.setEnabled(True)
+            return
+        
+        # Set up FFmpeg command for pipe input
+        output_path = self.get_unique_filename(output_path)
+        cmd = [
+            ffmpeg_path, 
+            '-f', 'rawvideo',
+            '-vcodec', 'rawvideo',
+            '-s', f'{pixmaps_list[0].width()}x{pixmaps_list[0].height()}',  # Use first frame size
+            '-pix_fmt', 'rgb24',
+            '-r', str(fps),
+            '-i', '-',  # Read from pipe
+            '-c:v', codec,
+        ]
+        
+        # Add quality settings
+        if quality == "high":
+            cmd.extend(['-crf', '18'])
+        elif quality == "medium":
+            cmd.extend(['-crf', '23'])
+        else:  # low
+            cmd.extend(['-crf', '28'])
+            
+        cmd.append(output_path)
+        
+        print(f"🎬 FFmpeg command: {' '.join(cmd)}")
+        
+        try:
+            # Start FFmpeg process
+            self.status_label.setText("🎬 Erstelle Video...")
+            process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+            # Send frames to FFmpeg
+            for i, pixmap in enumerate(pixmaps_list):
+                # Convert QPixmap to numpy array
+                frame_array = self.qpixmap_to_numpy(pixmap)
+                
+                # Apply upscaling if needed
+                if upscale != "1x":
+                    upscale_factor = self.parse_upscale_factor(upscale)
+                    if upscale_factor != 1:
+                        frame_array = self.upscale_frame(frame_array, upscale_factor)
+                
+                # Send frame to FFmpeg
+                process.stdin.write(frame_array.tobytes())
+                
+                # Update progress
+                progress = int((i + 1) / len(pixmaps_list) * 100)
+                self.progress_bar.setValue(progress)
+                self.status_label.setText(f"🎬 Frame {i+1}/{len(pixmaps_list)} ({progress}%)")
+            
+            # Close stdin and wait
+            process.stdin.close()
+            stdout, stderr = process.communicate()
+            
+            if process.returncode == 0:
+                self.progress_bar.setValue(100)
+                self.status_label.setText(f"✅ Video erstellt: {os.path.basename(output_path)}")
+                print(f"✅ Video export successful: {output_path}")
+            else:
+                self.status_label.setText(f"❌ FFmpeg Fehler: {stderr.decode()[:100]}")
+                print(f"❌ FFmpeg error: {stderr.decode()}")
+                
+        except Exception as e:
+            self.status_label.setText(f"❌ Export-Fehler: {str(e)}")
+            print(f"❌ Export error: {e}")
+            
+        finally:
+            self.export_btn.setEnabled(True)
+    
+    def on_interpolation_error(self, error_message):
+        """Called when interpolation worker encounters an error"""
+        print(f"❌ Interpolation error: {error_message}")
+        self.status_label.setText(f"❌ Interpolation-Fehler: {error_message}")
+        self.export_btn.setEnabled(True)
+    
+    def start_interpolation(self, image_files, folder_path, interp_steps, blend_intensity):
+        """Start the interpolation worker thread"""
+        self.interpolation_worker = InterpolationWorker(
+            image_files, folder_path, interp_steps, blend_intensity
+        )
+        self.interpolation_worker.progress.connect(self.update_progress)
+        self.interpolation_worker.status.connect(self.update_status)
+        self.interpolation_worker.finished.connect(self.on_interpolation_finished)
+        self.interpolation_worker.error.connect(self.on_interpolation_error)
+        self.interpolation_worker.start()
+    
+    def update_progress(self, value):
+        """Update progress bar from worker thread"""
+        self.progress_bar.setValue(value)
+    
+    def update_status(self, message):
+        """Update status label from worker thread"""
+        self.status_label.setText(message)
             
     def generate_interpolated_frames_qt(self, image_files, folder_path, interp_steps, blend_intensity):
         """Generate interpolated frames using Qt (GPU-accelerated) - much faster than PIL"""
