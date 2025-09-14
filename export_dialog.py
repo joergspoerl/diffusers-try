@@ -369,23 +369,46 @@ class SimpleVideoExportDialog(QDialog):
         
         def real_export():
             try:
+                print("🚀 Starting real_export...")
                 self.create_video_from_folder(
                     current_folder, output_path, fps, quality, upscale, codec,
                     use_interpolation, interp_steps, blend_intensity
                 )
+                print("✅ Export completed successfully")
+            except ImportError as e:
+                error_msg = f"❌ Import-Fehler: {str(e)}"
+                print(error_msg)
+                if "numpy" in str(e).lower():
+                    error_msg += " (NumPy-Kompatibilitätsproblem)"
+                self.status_label.setText(error_msg)
+                self.export_btn.setEnabled(True)
             except Exception as e:
-                self.status_label.setText(f"❌ Fehler: {str(e)}")
+                error_msg = f"❌ Export-Fehler: {str(e)}"
+                print(error_msg)
+                print(f"❌ Exception type: {type(e).__name__}")
+                import traceback
+                traceback.print_exc()
+                self.status_label.setText(error_msg)
                 self.export_btn.setEnabled(True)
                 
         thread = threading.Thread(target=real_export)
         thread.daemon = True
         thread.start()
     def parse_upscale_factor(self, upscale_text):
-        """Convert upscale text (e.g. '4x') to numeric factor"""
-        if isinstance(upscale_text, str):
-            # Remove 'x' and convert to int
-            return int(upscale_text.replace('x', ''))
-        return upscale_text  # Already numeric
+        """Convert upscale text (e.g. '4x') to numeric factor - with error handling"""
+        try:
+            if isinstance(upscale_text, str):
+                # Remove 'x' and convert to int
+                factor = int(upscale_text.replace('x', ''))
+                return factor
+            elif isinstance(upscale_text, (int, float)):
+                return int(upscale_text)
+            else:
+                print(f"⚠️ Unknown upscale format: {upscale_text}, defaulting to 1")
+                return 1
+        except (ValueError, TypeError) as e:
+            print(f"⚠️ Error parsing upscale factor '{upscale_text}': {e}, defaulting to 1")
+            return 1
     
     def create_video_in_memory(self, folder_path, output_path, fps, quality, upscale, codec,
                               use_interpolation=False, interp_steps=20, blend_intensity=0.3):
@@ -566,13 +589,9 @@ class SimpleVideoExportDialog(QDialog):
     def create_video_from_folder(self, folder_path, output_path, fps, quality, upscale, codec, 
                                 use_interpolation=False, interp_steps=20, blend_intensity=0.3):
         """Create video from image folder - smart selection between methods"""
-        # Use in-memory method for better performance when interpolation is enabled
-        if use_interpolation:
-            self.create_video_in_memory(folder_path, output_path, fps, quality, upscale, codec,
-                                      use_interpolation, interp_steps, blend_intensity)
-            return
-        
-        # Use file-based method for simple cases (legacy compatibility)
+        # For now, always use legacy method to avoid NumPy issues
+        # TODO: Re-enable in-memory method once NumPy is fixed
+        print("🔄 Using legacy file-based export method")
         self.create_video_from_folder_legacy(folder_path, output_path, fps, quality, upscale, codec,
                                            use_interpolation, interp_steps, blend_intensity)
     
