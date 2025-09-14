@@ -350,7 +350,8 @@ class SimpleVideoExportDialog(QDialog):
         # Get settings
         fps = self.fps_spin.value()
         quality = self.quality_combo.currentText()
-        upscale = self.upscale_combo.currentText()
+        upscale_text = self.upscale_combo.currentText()
+        upscale = self.parse_upscale_factor(upscale_text)
         codec = self.codec_combo.currentText()
         
         # Get interpolation settings
@@ -379,6 +380,13 @@ class SimpleVideoExportDialog(QDialog):
         thread = threading.Thread(target=real_export)
         thread.daemon = True
         thread.start()
+    def parse_upscale_factor(self, upscale_text):
+        """Convert upscale text (e.g. '4x') to numeric factor"""
+        if isinstance(upscale_text, str):
+            # Remove 'x' and convert to int
+            return int(upscale_text.replace('x', ''))
+        return upscale_text  # Already numeric
+    
     def create_video_in_memory(self, folder_path, output_path, fps, quality, upscale, codec,
                               use_interpolation=False, interp_steps=20, blend_intensity=0.3):
         """Ultra-fast video creation using in-memory processing with Qt"""
@@ -643,9 +651,9 @@ class SimpleVideoExportDialog(QDialog):
         cmd.extend(["-i", input_pattern])
         
         # Upscaling
-        if upscale != "1x":
-            scale_factor = int(upscale.replace("x", ""))
-            cmd.extend(["-vf", f"scale=iw*{scale_factor}:ih*{scale_factor}:flags=lanczos"])
+        upscale_factor = self.parse_upscale_factor(upscale) if isinstance(upscale, str) else upscale
+        if upscale_factor != 1:
+            cmd.extend(["-vf", f"scale=iw*{upscale_factor}:ih*{upscale_factor}:flags=lanczos"])
         
         # Video codec
         cmd.extend(["-c:v", codec])
@@ -862,20 +870,44 @@ class SimpleVideoExportDialog(QDialog):
             
     def find_ffmpeg(self):
         """Try to find FFmpeg executable - prioritize local installation"""
-        # Use shared utility function
-        from sdgen.utils import find_ffmpeg as find_ffmpeg_util
+        import shutil
         
-        ffmpeg_path = find_ffmpeg_util()
+        # Get project root directory
+        project_root = os.path.dirname(os.path.abspath(__file__))
         
-        if ffmpeg_path:
-            print(f"✅ Found FFmpeg: {ffmpeg_path}")
-            return ffmpeg_path
-        else:
-            print("❌ FFmpeg not found in any location")
-            project_root = os.path.dirname(os.path.abspath(__file__))
-            print(f"🔍 Searched in project: {project_root}")
-            print("💡 Tipp: FFmpeg sollte unter ffmpeg/ffmpeg-master-latest-win64-gpl/bin/ liegen")
-            return None
+        # Priority order: Local project FFmpeg first, then system installations
+        possible_paths = [
+            # Local project FFmpeg (highest priority)
+            os.path.join(project_root, "ffmpeg", "ffmpeg-master-latest-win64-gpl", "bin", "ffmpeg.exe"),
+            os.path.join(project_root, "ffmpeg", "bin", "ffmpeg.exe"),
+            os.path.join(project_root, "bin", "ffmpeg.exe"),
+            os.path.join(project_root, "ffmpeg.exe"),
+            
+            # System PATH
+            "ffmpeg",  # Unix/Linux in PATH
+            "ffmpeg.exe",  # Windows in PATH
+            
+            # Common Windows system installations
+            r"C:\ffmpeg\bin\ffmpeg.exe",
+            r"C:\Program Files\ffmpeg\bin\ffmpeg.exe", 
+            r"C:\Program Files (x86)\ffmpeg\bin\ffmpeg.exe",
+        ]
+        
+        for path in possible_paths:
+            # Check if file exists directly (for absolute paths)
+            if os.path.isfile(path):
+                print(f"✅ Found local FFmpeg: {path}")
+                return path
+            # Check if command exists in PATH (for relative commands)
+            elif shutil.which(path):
+                found_path = shutil.which(path)
+                print(f"✅ Found system FFmpeg: {found_path}")
+                return found_path
+                
+        print("❌ FFmpeg not found in any location")
+        print(f"🔍 Searched in project: {project_root}")
+        print("💡 Tipp: FFmpeg sollte unter ffmpeg/ffmpeg-master-latest-win64-gpl/bin/ liegen")
+        return None
         
     def try_opencv_export(self, image_files, output_path, fps, upscale):
         """Fallback: Create video using OpenCV if available"""
@@ -891,10 +923,10 @@ class SimpleVideoExportDialog(QDialog):
             width, height = first_img.size
             
             # Apply upscaling
-            if upscale != "1x":
-                scale_factor = int(upscale.replace("x", ""))
-                width *= scale_factor
-                height *= scale_factor
+            upscale_factor = self.parse_upscale_factor(upscale) if isinstance(upscale, str) else upscale
+            if upscale_factor != 1:
+                width *= upscale_factor
+                height *= upscale_factor
             
             # Create video writer
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
@@ -918,9 +950,9 @@ class SimpleVideoExportDialog(QDialog):
                 img = Image.open(img_path).convert('RGB')
                 
                 # Apply upscaling if needed
-                if upscale != "1x":
-                    scale_factor = int(upscale.replace("x", ""))
-                    new_size = (img.width * scale_factor, img.height * scale_factor)
+                upscale_factor = self.parse_upscale_factor(upscale) if isinstance(upscale, str) else upscale
+                if upscale_factor != 1:
+                    new_size = (img.width * upscale_factor, img.height * upscale_factor)
                     img = img.resize(new_size, Image.Resampling.LANCZOS)
                 
                 # Convert PIL to OpenCV format
