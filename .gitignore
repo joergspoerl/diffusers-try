@@ -32,6 +32,10 @@ __pycache__/
 # Outputs generated
 outputs/
 
+# FFmpeg binaries (large files)
+ffmpeg/
+ffmpeg.zip
+
 # Hugging Face / Auth
 huggingface/token
 huggingface/*
