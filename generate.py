@@ -259,28 +259,59 @@ def process_config(config_path):
 def batch_mode(input_dir, output_dir, poll_interval=5):
     """Batch-Modus: Überwacht input_dir auf neue Configs und verarbeitet sie"""
     done_dir = os.path.join(output_dir, "done")
+    error_dir = os.path.join(output_dir, "error")
     os.makedirs(done_dir, exist_ok=True)
+    os.makedirs(error_dir, exist_ok=True)
     print(f"[Batch] Überwache {input_dir} auf neue Configs...")
     
     while True:
-        configs = [f for f in os.listdir(input_dir) if f.endswith('.json')]
+        try:
+            configs = [f for f in os.listdir(input_dir) if f.endswith('.json')]
+        except FileNotFoundError:
+            print(f"[Batch] WARNUNG: Verzeichnis {input_dir} nicht gefunden. Erstelle es...")
+            os.makedirs(input_dir, exist_ok=True)
+            configs = []
+        
         if configs:
             for config_file in configs:
                 config_path = os.path.join(input_dir, config_file)
+                
+                # Prüfe ob Datei existiert (könnte bereits verschoben worden sein)
+                if not os.path.exists(config_path):
+                    print(f"[Batch] ÜBERSPRINGE {config_file}: Datei bereits verschoben oder nicht gefunden")
+                    continue
+                
                 print(f"[Batch] Verarbeite {config_file}")
                 
+                success = False
                 try:
                     # Verarbeite Config-Datei
                     paths = process_config(config_path)
-                    print(f"[Batch] Fertig: {config_file} ({len(paths)} Dateien generiert)")
+                    print(f"[Batch] ERFOLG: {config_file} ({len(paths)} Dateien generiert)")
+                    success = True
                 except Exception as e:
-                    print(f"[Batch] Fehler bei {config_file}: {e}")
+                    print(f"[Batch] FEHLER bei {config_file}: {e}")
                     import traceback
                     traceback.print_exc()
+                    success = False
                 
-                # Verschiebe Config in done-Ordner
-                shutil.move(config_path, os.path.join(done_dir, config_file))
-                print(f"[Batch] Verschoben nach {done_dir}")
+                # Verschiebe Config nur wenn sie noch existiert
+                try:
+                    if os.path.exists(config_path):
+                        if success:
+                            # Erfolgreich verarbeitet -> nach done/
+                            target_path = os.path.join(done_dir, config_file)
+                            shutil.move(config_path, target_path)
+                            print(f"[Batch] Verschoben nach done/: {config_file}")
+                        else:
+                            # Fehler aufgetreten -> nach error/
+                            target_path = os.path.join(error_dir, config_file)
+                            shutil.move(config_path, target_path)
+                            print(f"[Batch] Verschoben nach error/: {config_file}")
+                    else:
+                        print(f"[Batch] Datei {config_file} bereits verschoben oder gelöscht")
+                except Exception as move_error:
+                    print(f"[Batch] WARNUNG: Konnte {config_file} nicht verschieben: {move_error}")
         else:
             print("[Batch] Keine neuen Configs gefunden. Warten...")
         
